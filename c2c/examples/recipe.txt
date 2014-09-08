@@ -1,0 +1,155 @@
+# an example recipe with multiple targets
+
+target multi_file
+    $warnings no-unused
+    multi_file1.c2
+    multi_file2.c2
+end
+
+target multi_mod
+    $warnings no-unused
+    multi_mod1.c2
+    multi_mod2.c2
+end
+
+target layer
+    $warnings no-unused
+    layer1.c2
+    layer2.c2
+    layer3.c2
+end
+
+target comment
+    $warnings no-unused
+    commenttest.c2
+end
+
+target hello
+    $warnings no-unused
+    helloworld.c2
+end
+
+target iter
+    $warnings no-unused
+    itertest.c2
+end
+
+target switch
+    $warnings no-unused
+    switchtest.c2
+end
+
+target typetest
+    $warnings no-unused
+    typetest.c2
+    utils.c2
+end
+
+target working_ir
+    $warnings no-unused
+    working_ir.c2
+end
+
+target array
+    $warnings no-unused
+    arraytest.c2
+end
+
+target body
+    $warnings no-unused
+    bodytest.c2
+end
+
+target decl
+    $warnings no-unused
+    decltest.c2
+end
+
+target expr
+    $warnings no-unused
+    expressiontest.c2
+end
+
+target func
+    $warnings no-unused
+    functest.c2
+    utils.c2
+end
+
+target if
+    $warnings no-unused
+    if.c2
+end
+
+target test
+    $warnings no-unused
+    test.c2
+end
+
+target inctest
+    $warnings no-unused
+    inctest.c2
+end
+
+target deftest
+    $warnings no-unused
+    $config FOOBAR
+    deftest.c2
+end
+
+target var
+    $warnings no-unused
+    vartest.c2
+end
+
+target working
+    $warnings no-unused
+    working.c2
+end
+
+target use_as
+    $warnings no-unused
+    use1.c2
+    use2.c2
+    use3.c2
+end
+
+target unarytest
+    $warnings no-unused
+    unaryTest.c2
+end
+
+target issue
+    $warnings no-unused
+    issue1.c2
+    issue2.c2
+    issue_type1.c2
+    issue_type2.c2
+end
+
+target ccode
+    $warnings no-unused
+    ccode.c2
+    ccode2.c2
+    ccode3.c2
+end
+
+lib mylib
+    $warnings no-unused
+    $ansi-c
+    mylib1.c2
+end
+
+target puzzle
+    $deps show_files show_externals
+    $ansi-c no_local_prefix single_module
+    puzzle.c2
+    puzzle2.c2
+end
+
+target snake
+    $warnings no-unused
+    $deps show_files show_externals
+    $ansi-c no_local_prefix single_module
+    snake.c2
+end

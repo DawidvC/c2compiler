@@ -1,0 +1,16 @@
+package test;
+
+use stdio as io;
+
+public func int main(int a) {
+//func void main() {
+//    int a = 10;
+    if (a) {
+        io.puts("hello\n");
+    } else {
+        io.puts("goodbye\n");
+    }
+    return 0;
+}
+
+

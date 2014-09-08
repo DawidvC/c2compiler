@@ -1,0 +1,10 @@
+// @warnings{no-unused-function}
+module test;
+
+int a;  // @warning{unused variable a}
+
+func void test1() {
+    a = 10;
+}
+
+

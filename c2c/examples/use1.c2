@@ -1,6 +1,6 @@
-package use1;
+module use1;
 
 public type Number int;
 
-type Coor u8;
+type Coor uint8;
 

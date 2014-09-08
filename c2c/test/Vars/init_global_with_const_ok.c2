@@ -1,0 +1,8 @@
+// @warnings{no-unused}
+module test;
+
+const int Const = 1;
+
+int a = Const;
+int b = test.Const;
+

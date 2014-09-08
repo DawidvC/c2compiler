@@ -1,0 +1,6 @@
+module test;
+
+func int[] test() {     // @error{expected identifier}
+    return 0;
+}
+

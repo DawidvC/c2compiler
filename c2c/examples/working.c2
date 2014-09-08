@@ -1,17 +1,17 @@
-package working;
+module working;
 
-use stdio;
+import stdio;
 
 type Number int;
 
-public string name = "Hallo";
+public const char* name = "Hallo";
 
 int[] numbers = { 1, 1, 2, 3, 5, 8, 13 }
 
 type Buffer struct {
     int size;
-    u8* data;
-    u16 count;
+    uint8* data;
+    uint16 count;
 }
 
 public func void foo(int a, const char* text) {

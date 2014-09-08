@@ -1,0 +1,11 @@
+// @warnings{no-unused}
+module test;
+
+int Num = 10;
+
+func void test1() {
+    int a = Num;
+    int b = test.Num;
+    char c = test.Num; // @warning{implicit conversion loses integer precision: 'int32' to 'int8'}
+}
+

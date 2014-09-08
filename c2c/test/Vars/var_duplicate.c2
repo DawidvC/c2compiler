@@ -1,0 +1,5 @@
+module test;
+
+int a;
+int a;      // @error{redefinition of a}
+

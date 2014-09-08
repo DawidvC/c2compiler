@@ -1,0 +1,12 @@
+// @warnings{no-unused-function}
+module test;
+
+type Point struct {
+    int x;
+}
+
+func int test1() {
+    Point p = { 10 }
+    return p.x;
+}
+

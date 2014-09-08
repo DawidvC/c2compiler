@@ -1,0 +1,7 @@
+// @warnings{no-unused-variable}
+module test;
+
+public type Number int;
+
+public test.Number n;
+

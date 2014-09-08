@@ -1,0 +1,10 @@
+// @warnings{no-unused-function}
+module test;
+
+int a;
+
+func int test1() {
+    int b = a;
+    return b;
+}
+

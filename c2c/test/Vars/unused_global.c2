@@ -1,0 +1,6 @@
+module test;
+
+int a;  // @warning{unused variable a}
+
+public int b;  // @warning{unused variable b}
+

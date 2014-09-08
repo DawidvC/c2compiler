@@ -1,0 +1,12 @@
+// @warnings{no-unused}
+module test;
+
+int a;
+
+func void test1(int a) {}        // @error{redefinition of a}
+
+public func int main() {
+    return 0;
+}
+
+

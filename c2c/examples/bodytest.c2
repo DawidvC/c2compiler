@@ -1,4 +1,4 @@
-package body_test;
+module body_test;
 
 public func void getMax() {
     int a;
@@ -12,8 +12,7 @@ public func void getMax() {
 
 int number = 10;
 
-//type CB func void();  // doesn't work yet
-type CB int;
+type CB func void();
 
 func void callback(CB cb) {}
 
@@ -33,7 +32,7 @@ func void test() {
     int[10] a2;
     int[5][5] buffer;
     char* text;
-    u32*[10] pointers;
+    uint32*[10] pointers;
     //const char* text2;
 }
 

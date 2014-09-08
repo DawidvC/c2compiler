@@ -1,0 +1,13 @@
+// @warnings{no-unused}
+module test;
+
+func void func1() {
+    {
+        int a;
+    }
+    {
+        int b;
+    }
+}
+
+

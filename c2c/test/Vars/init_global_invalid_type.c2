@@ -1,0 +1,5 @@
+// @warnings{no-unused}
+module test;
+
+int a = "test";     // @error{invalid type conversion from 'int8*' to 'int32'}
+

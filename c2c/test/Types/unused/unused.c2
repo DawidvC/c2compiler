@@ -1,0 +1,4 @@
+module test;
+
+type Number int;    // @warning{unused type Number}
+
