@@ -1,9 +1,0 @@
-// @warnings{no-unused}
-module test;
-
-func void test1() {
-    char a = 1;
-    char b = 2;
-    int c = a + b;
-}
-

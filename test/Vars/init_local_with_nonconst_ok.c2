@@ -1,0 +1,9 @@
+// @warnings{no-unused}
+module test;
+
+int32 b = 1;
+
+func void function() {
+    int32 a = b;
+}
+

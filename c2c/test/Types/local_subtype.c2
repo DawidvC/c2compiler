@@ -1,4 +1,0 @@
-module test;
-
-type Foo local int;     // @error{cannot use keyword local for type definitions}
-

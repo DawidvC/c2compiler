@@ -1,0 +1,6 @@
+module test;
+
+public func int32 main() {
+    return 0;
+}
+

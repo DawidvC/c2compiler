@@ -1,0 +1,14 @@
+// @recipe bin
+    $warnings no-unused-variable
+
+// @file{file1}
+module foo;
+
+public const int32 N = 1;
+
+// @file{file2}
+module bar;
+import foo local;
+
+public int32 y = N;
+

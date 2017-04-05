@@ -1,0 +1,8 @@
+// @warnings{no-unused}
+module test;
+
+func void test1() {
+    float f = 3.14;
+    int8 a = f; // @warning{implicit conversion turns floating-point number into integer: 'float32' to 'int8'}
+}
+

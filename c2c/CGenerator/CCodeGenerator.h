@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,88 +17,102 @@
 #define CGENERATOR_CCODE_GENERATOR_H
 
 #include <string>
-#include <vector>
 
+#include "CGenerator/TypeSorter.h"
 #include "AST/Module.h"
-#include "AST/Type.h"
 #include "Utils/StringBuilder.h"
 
 namespace C2 {
 
-class AST;
-class Type;
 class Decl;
 class VarDecl;
-class ImportDecl;
 class TypeDecl;
 class FunctionDecl;
 class StructTypeDecl;
 class FunctionTypeDecl;
-class FunctionDecl;
+class EnumTypeDecl;
+class QualType;
 class Expr;
-class DeclExpr;
 class Stmt;
 class CompoundStmt;
+class HeaderNamer;
+class TargetInfo;
 
-// generates LLVM Module from (multiple) ASTs
-class CCodeGenerator {
+// generates LLVM Module from (multiple) Module(s)
+class CCodeGenerator : public CTypeWriter {
 public:
     enum Mode { MULTI_FILE, SINGLE_FILE };
-    CCodeGenerator(const std::string& filename_, Mode mode_, const Modules& modules_, bool prefix);
+    CCodeGenerator(const std::string& filename_,
+                   Mode mode_,
+                   const Modules& modules_,
+                   const ModuleList& mods_,
+                   const HeaderNamer& namer_,
+                   const TargetInfo& targetInfo_);
     ~CCodeGenerator();
 
-    void addEntry(AST& ast) { entries.push_back(&ast); }
-    void generate();
-    void write(const std::string& target, const std::string& name);
-    void dump();
+    void generate(bool printCode, const std::string& outputDir);
+    void createLibHeader(bool printCode, const std::string& outputDir);
 
+    // for CTypeWriter
+    virtual void forwardDecl(const Decl* D);
+    virtual void fullDecl(const Decl* D);
 private:
+    void EmitAll();
+    void EmitIncludeGuard();
     void EmitIncludes();
 
-    void EmitFunction(FunctionDecl* F);
-    void EmitFunctionArgs(FunctionDecl* F, StringBuilder& output);
-    void EmitVariable(VarDecl* D);
-    void EmitTypeDecl(TypeDecl* D);
-    void EmitStructType(StructTypeDecl* S, StringBuilder& output, unsigned indent);
-    void EmitEnumType(EnumTypeDecl* E, StringBuilder& output);
-    void EmitFunctionType(FunctionTypeDecl* F, StringBuilder& output);
-    void EmitVarDecl(VarDecl* D, StringBuilder& output, unsigned indent);
+    void EmitFunctionForward(const FunctionDecl* F);
+    void EmitFunction(const FunctionDecl* F);
+    void EmitFunctionArgs(const FunctionDecl* F, StringBuilder& output);
+    void EmitConstant(const VarDecl* D);
+    void EmitGlobalVariable(const VarDecl* D);
+    void EmitTypeDecl(const TypeDecl* D);
+    void EmitForwardTypeDecl(const TypeDecl* D);
+    void EmitStructType(const StructTypeDecl* S, StringBuilder& output, unsigned indent);
+    void EmitEnumType(const EnumTypeDecl* E, StringBuilder& output);
+    void EmitFunctionType(const FunctionTypeDecl* F, StringBuilder& output);
+    void EmitArgVarDecl(const VarDecl* D, StringBuilder& output, unsigned index);
+    void EmitVarDecl(const VarDecl* D, StringBuilder& output, unsigned indent);
 
-    void EmitStmt(Stmt* S, unsigned indent);
-    void EmitCompoundStmt(CompoundStmt* C, unsigned indent, bool startOnNewLine);
-    void EmitIfStmt(Stmt* S, unsigned indent);
-    void EmitWhileStmt(Stmt* S, unsigned indent);
-    void EmitDoStmt(Stmt* S, unsigned indent);
-    void EmitForStmt(Stmt* S, unsigned indent);
-    void EmitSwitchStmt(Stmt* S, unsigned indent);
+    void EmitStmt(const Stmt* S, unsigned indent);
+    void EmitCompoundStmt(const CompoundStmt* C, unsigned indent, bool startOnNewLine);
+    void EmitIfStmt(const Stmt* S, unsigned indent);
+    void EmitWhileStmt(const Stmt* S, unsigned indent);
+    void EmitDoStmt(const Stmt* S, unsigned indent);
+    void EmitForStmt(const Stmt* S, unsigned indent);
+    void EmitSwitchStmt(const Stmt* S, unsigned indent);
+    void EmitDeclStmt(const Stmt* S, unsigned indent);
 
-    void EmitExpr(Expr* E, StringBuilder& output);
-    void EmitBinaryOperator(Expr* E, StringBuilder& output);
-    void EmitConditionalOperator(Expr* E, StringBuilder& output);
-    void EmitUnaryOperator(Expr* E, StringBuilder& output);
-    void EmitMemberExpr(Expr* E, StringBuilder& output);
-    void EmitDeclExpr(DeclExpr* D, StringBuilder& output, unsigned indent);
-    void EmitCallExpr(Expr* E, StringBuilder& output);
-    void EmitIdentifierExpr(Expr* E, StringBuilder& output);
+    void EmitExpr(const Expr* E, StringBuilder& output);
+    void EmitBuiltinExpr(const Expr* E, StringBuilder& output);
+    void EmitBinaryOperator(const Expr* E, StringBuilder& output);
+    void EmitConditionalOperator(const Expr* E, StringBuilder& output);
+    void EmitUnaryOperator(const Expr* E, StringBuilder& output);
+    void EmitMemberExpr(const Expr* E, StringBuilder& output);
+    void EmitCallExpr(const Expr* E, StringBuilder& output);
+    void EmitIdentifierExpr(const Expr* E, StringBuilder& output);
+    void EmitBitOffsetExpr(const Expr* Base, Expr* E, StringBuilder& output);
 
     // Helpers
     void EmitDecl(const Decl* D, StringBuilder& output);
-    void EmitFunctionProto(FunctionDecl* F, StringBuilder& output);
+    void EmitFunctionProto(const FunctionDecl* F, StringBuilder& output);
     void EmitTypePreName(QualType type, StringBuilder& output);
     void EmitTypePostName(QualType type, StringBuilder& output);
     void EmitStringLiteral(const std::string& input, StringBuilder& output);
-    void addPrefix(const std::string& modName, const std::string& name, StringBuilder& buffer) const;
+    void EmitConditionPre(const Stmt* S, unsigned indent);
+    void EmitConditionPost(const Stmt* S);
+    void EmitAttributes(const Decl* D, StringBuilder& output);
+
+    bool EmitAsStatic(const Decl* D) const;
 
     const std::string& filename;
-    const std::string* curmod;
     Mode mode;
-    bool no_local_prefix;
+    bool inInterface;
 
     const Modules& modules;
-
-    typedef std::vector<AST*> Entries;
-    typedef Entries::iterator EntriesIter;
-    Entries entries;
+    const ModuleList& mods;
+    const HeaderNamer& headerNamer;
+    const TargetInfo& targetInfo;
 
     StringBuilder cbuf;
     StringBuilder hbuf;

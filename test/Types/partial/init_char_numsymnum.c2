@@ -1,0 +1,9 @@
+// @warnings{no-unused}
+module test;
+
+func void test1() {
+    int8 a = 1;
+    int8 b = 100 + a + 100;     // NOTE: ok since no single expr has overflow/error
+    int8 c = a + 100 + 100;     // idem
+}
+

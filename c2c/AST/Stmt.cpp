@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,55 +14,108 @@
  */
 
 #include <stdio.h>
-#include <string.h>
 
 #include "AST/Stmt.h"
 #include "AST/Expr.h"
+#include "AST/Decl.h"
+#include "AST/ASTContext.h"
 #include "Utils/StringBuilder.h"
-#include "Utils/Utils.h"
 #include "Utils/color.h"
-#include "Utils/constants.h"
+#include "Utils/UtilsConstants.h"
 
 using namespace C2;
 using namespace std;
 
-//#define STMT_DEBUG
-#ifdef STMT_DEBUG
-static int creationCount;
-static int deleteCount;
-#endif
-
-Stmt::Stmt(StmtKind k) : BitsInit(0) {
-    StmtBits.sKind = k;
-#ifdef STMT_DEBUG
-    creationCount++;
-    fprintf(stderr, "[STMT] create %p  created %d deleted %d\n", this, creationCount, deleteCount);
-#endif
+Stmt::Stmt(StmtKind k) {
+    stmtBits.sKind = k;
 }
 
-Stmt::~Stmt() {
-#ifdef STMT_DEBUG
-    deleteCount++;
-    fprintf(stderr, "[STMT] delete %p  created %d deleted %d\n", this, creationCount, deleteCount);
-#endif
+void* Stmt::operator new(size_t bytes, const C2::ASTContext& C, unsigned alignment) {
+    return ::operator new(bytes, C, alignment);
+}
+
+void Stmt::print(StringBuilder& buffer, unsigned indent) const {
+    switch (getKind()) {
+    case STMT_RETURN:
+        return cast<ReturnStmt>(this)->print(buffer, indent);
+    case STMT_EXPR:
+        return cast<Expr>(this)->print(buffer, indent);
+    case STMT_IF:
+        return cast<IfStmt>(this)->print(buffer, indent);
+    case STMT_WHILE:
+        return cast<WhileStmt>(this)->print(buffer, indent);
+    case STMT_DO:
+        return cast<DoStmt>(this)->print(buffer, indent);
+    case STMT_FOR:
+        return cast<ForStmt>(this)->print(buffer, indent);
+    case STMT_SWITCH:
+        return cast<SwitchStmt>(this)->print(buffer, indent);
+    case STMT_CASE:
+        return cast<CaseStmt>(this)->print(buffer, indent);
+    case STMT_DEFAULT:
+        return cast<DefaultStmt>(this)->print(buffer, indent);
+    case STMT_BREAK:
+        return cast<BreakStmt>(this)->print(buffer, indent);
+    case STMT_CONTINUE:
+        return cast<ContinueStmt>(this)->print(buffer, indent);
+    case STMT_LABEL:
+        return cast<LabelStmt>(this)->print(buffer, indent);
+    case STMT_GOTO:
+        return cast<GotoStmt>(this)->print(buffer, indent);
+    case STMT_COMPOUND:
+        return cast<CompoundStmt>(this)->print(buffer, indent);
+    case STMT_DECL:
+        return cast<DeclStmt>(this)->print(buffer, indent);
+    }
+}
+
+SourceLocation Stmt::getLocation() const {
+    switch (getKind()) {
+    case STMT_RETURN:
+        return cast<ReturnStmt>(this)->getLocation();
+    case STMT_EXPR:
+        return cast<Expr>(this)->getLocation();
+    case STMT_IF:
+        return cast<IfStmt>(this)->getLocation();
+    case STMT_WHILE:
+        return cast<WhileStmt>(this)->getLocation();
+    case STMT_DO:
+        return cast<DoStmt>(this)->getLocation();
+    case STMT_FOR:
+        return cast<ForStmt>(this)->getLocation();
+    case STMT_SWITCH:
+        return cast<SwitchStmt>(this)->getLocation();
+    case STMT_CASE:
+        return cast<CaseStmt>(this)->getLocation();
+    case STMT_DEFAULT:
+        return cast<DefaultStmt>(this)->getLocation();
+    case STMT_BREAK:
+        return cast<BreakStmt>(this)->getLocation();
+    case STMT_CONTINUE:
+        return cast<ContinueStmt>(this)->getLocation();
+    case STMT_LABEL:
+        return cast<LabelStmt>(this)->getLocation();
+    case STMT_GOTO:
+        return cast<GotoStmt>(this)->getLocation();
+    case STMT_COMPOUND:
+        return cast<CompoundStmt>(this)->getLocation();
+    case STMT_DECL:
+        return cast<DeclStmt>(this)->getLocation();
+    }
 }
 
 void Stmt::dump() const {
     StringBuilder buffer;
     print(buffer, 0);
-    fprintf(stderr, "%s\n", (const char*)buffer);
+    fprintf(stderr, "%s\n", buffer.c_str());
 }
 
 
 ReturnStmt::ReturnStmt(SourceLocation loc, Expr* value_)
     : Stmt(STMT_RETURN)
-    , value(value_)
     , RetLoc(loc)
+    , value(value_)
 {}
-
-ReturnStmt::~ReturnStmt() {
-    delete value;
-}
 
 void ReturnStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
@@ -75,7 +128,7 @@ void ReturnStmt::print(StringBuilder& buffer, unsigned indent) const {
 
 
 IfStmt::IfStmt(SourceLocation ifLoc,
-               Expr* condition, Stmt* thenStmt,
+               Stmt* condition, Stmt* thenStmt,
                SourceLocation elseLoc, Stmt* elseStmt)
     : Stmt(STMT_IF)
     , IfLoc(ifLoc)
@@ -87,13 +140,6 @@ IfStmt::IfStmt(SourceLocation ifLoc,
     SubExprs[ELSE] = elseStmt;
 }
 
-IfStmt::~IfStmt() {
-    delete SubExprs[VAR];
-    delete SubExprs[COND];
-    delete SubExprs[THEN];
-    delete SubExprs[ELSE];
-}
-
 void IfStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
     buffer.setColor(COL_STMT);
@@ -103,18 +149,21 @@ void IfStmt::print(StringBuilder& buffer, unsigned indent) const {
     if (SubExprs[ELSE]) SubExprs[ELSE]->print(buffer, indent + INDENT);
 }
 
+VarDecl* IfStmt::getConditionVariable() const {
+    const Stmt* C = getCond();
+    if (isa<DeclStmt>(C)) {
+        return cast<DeclStmt>(C)->getDecl();
+    } else {
+        return NULL;
+    }
+}
 
-WhileStmt::WhileStmt(SourceLocation Loc_, Expr* Cond_, Stmt* Then_)
+WhileStmt::WhileStmt(SourceLocation Loc_, Stmt* Cond_, Stmt* Then_)
     : Stmt(STMT_WHILE)
     , Loc(Loc_)
     , Cond(Cond_)
     , Then(Then_)
 {}
-
-WhileStmt::~WhileStmt() {
-    delete Cond;
-    delete Then;
-}
 
 void WhileStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
@@ -131,11 +180,6 @@ DoStmt::DoStmt(SourceLocation Loc_, Expr* Cond_, Stmt* Then_)
     , Cond(Cond_)
     , Then(Then_)
 {}
-
-DoStmt::~DoStmt() {
-    delete Cond;
-    delete Then;
-}
 
 void DoStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
@@ -155,13 +199,6 @@ ForStmt::ForStmt(SourceLocation Loc_, Stmt* Init_, Expr* Cond_, Expr* Incr_, Stm
     , Body(Body_)
 {}
 
-ForStmt::~ForStmt() {
-    delete Body;
-    delete Incr;
-    delete Cond;
-    delete Init;
-}
-
 void ForStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
     buffer.setColor(COL_STMT);
@@ -173,15 +210,13 @@ void ForStmt::print(StringBuilder& buffer, unsigned indent) const {
 }
 
 
-SwitchStmt::SwitchStmt(SourceLocation Loc_, Expr* Cond_, StmtList& Cases_)
+SwitchStmt::SwitchStmt(SourceLocation Loc_, Stmt* Cond_, Stmt** cases_, unsigned numCases_)
     : Stmt(STMT_SWITCH)
     , Loc(Loc_)
     , Cond(Cond_)
-    , Cases(Cases_)
-{}
-
-SwitchStmt::~SwitchStmt() {
-    delete Cond;
+    , cases(cases_)
+{
+    switchStmtBits.numCases = numCases_;
 }
 
 void SwitchStmt::print(StringBuilder& buffer, unsigned indent) const {
@@ -189,21 +224,19 @@ void SwitchStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.setColor(COL_STMT);
     buffer << "SwitchStmt\n";
     Cond->print(buffer, indent + INDENT);
-    for (unsigned i=0; i<Cases.size(); i++) {
-        Cases[i]->print(buffer, indent + INDENT);
+    for (unsigned i=0; i<numCases(); i++) {
+        cases[i]->print(buffer, indent + INDENT);
     }
 }
 
 
-CaseStmt::CaseStmt(SourceLocation Loc_, Expr* Cond_, StmtList& Stmts_)
+CaseStmt::CaseStmt(SourceLocation Loc_, Expr* Cond_, Stmt** stmts_, unsigned numStmts_)
     : Stmt(STMT_CASE)
     , Loc(Loc_)
     , Cond(Cond_)
-    , Stmts(Stmts_)
-{}
-
-CaseStmt::~CaseStmt() {
-    delete Cond;
+    , stmts(stmts_)
+{
+    caseStmtBits.numStmts = numStmts_;
 }
 
 void CaseStmt::print(StringBuilder& buffer, unsigned indent) const {
@@ -211,26 +244,26 @@ void CaseStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.setColor(COL_STMT);
     buffer << "CaseStmt\n";
     Cond->print(buffer, indent + INDENT);
-    for (unsigned i=0; i<Stmts.size(); i++) {
-        Stmts[i]->print(buffer, indent + INDENT);
+    for (unsigned i=0; i<numStmts(); i++) {
+        stmts[i]->print(buffer, indent + INDENT);
     }
 }
 
 
-DefaultStmt::DefaultStmt(SourceLocation Loc_, StmtList& Stmts_)
+DefaultStmt::DefaultStmt(SourceLocation Loc_, Stmt** stmts_, unsigned numStmts_)
     : Stmt(STMT_DEFAULT)
     , Loc(Loc_)
-    , Stmts(Stmts_)
-{}
-
-DefaultStmt::~DefaultStmt() {}
+    , stmts(stmts_)
+{
+    defaultStmtBits.numStmts = numStmts_;
+}
 
 void DefaultStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
     buffer.setColor(COL_STMT);
     buffer << "DefaultStmt\n";
-    for (unsigned i=0; i<Stmts.size(); i++) {
-        Stmts[i]->print(buffer, indent + INDENT);
+    for (unsigned i=0; i<numStmts(); i++) {
+        stmts[i]->print(buffer, indent + INDENT);
     }
 }
 
@@ -240,8 +273,6 @@ BreakStmt::BreakStmt(SourceLocation Loc_)
     , Loc(Loc_)
 {}
 
-BreakStmt::~BreakStmt() {}
-
 void BreakStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
     buffer.setColor(COL_STMT);
@@ -250,11 +281,9 @@ void BreakStmt::print(StringBuilder& buffer, unsigned indent) const {
 
 
 ContinueStmt::ContinueStmt(SourceLocation Loc_)
-    : Stmt(STMT_BREAK)
+    : Stmt(STMT_CONTINUE)
     , Loc(Loc_)
 {}
-
-ContinueStmt::~ContinueStmt() {}
 
 void ContinueStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
@@ -265,18 +294,17 @@ void ContinueStmt::print(StringBuilder& buffer, unsigned indent) const {
 
 LabelStmt::LabelStmt(const char* name_, SourceLocation Loc_, Stmt* subStmt_)
     : Stmt(STMT_LABEL)
-    , name(name_), Loc(Loc_), subStmt(subStmt_)
+    , Loc(Loc_)
+    , name(name_)
+    , subStmt(subStmt_)
 {}
-
-LabelStmt::~LabelStmt()
-{
-    delete subStmt;
-}
 
 void LabelStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
     buffer.setColor(COL_STMT);
-    buffer << "LabelStmt\n";
+    buffer << "LabelStmt ";
+    buffer.setColor(COL_VALUE);
+    buffer << name << '\n';
     subStmt->print(buffer, indent + INDENT);
 }
 
@@ -286,55 +314,70 @@ GotoStmt::GotoStmt(const char* name_, SourceLocation GotoLoc_, SourceLocation La
     , name(name_), GotoLoc(GotoLoc_), LabelLoc(LabelLoc_)
 {}
 
-GotoStmt::~GotoStmt() {}
-
 void GotoStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
     buffer.setColor(COL_STMT);
-    buffer << "GotoStmt\n";
+    buffer << "GotoStmt ";
+    buffer.setColor(COL_VALUE);
+    buffer << name << '\n';
 }
 
 
-CompoundStmt::CompoundStmt(SourceLocation l, SourceLocation r, StmtList& stmts_)
+CompoundStmt::CompoundStmt(SourceLocation l, SourceLocation r, Stmt** stmts_, unsigned numStmts_)
     : Stmt(STMT_COMPOUND)
     , Left(l)
     , Right(r)
-    , Stmts(stmts_)
-{}
-
-CompoundStmt::~CompoundStmt() {}
+    , stmts(stmts_)
+{
+    compoundStmtBits.numStmts = numStmts_;
+}
 
 void CompoundStmt::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
     buffer.setColor(COL_STMT);
     buffer << "CompoundStmt\n";
-    for (unsigned i=0; i<Stmts.size(); i++) {
-        Stmts[i]->print(buffer, indent + INDENT);
+    for (unsigned i=0; i<numStmts(); i++) {
+        stmts[i]->print(buffer, indent + INDENT);
     }
 }
 
 Stmt* CompoundStmt::getLastStmt() const {
-    if (Stmts.size() == 0) return 0;
-    else {
-        // NOTE: if last is compound, get last from that one
-        // NOTE: if last is label, get label.subStmt
-        // TODO handle goto statement as last statement
-        Stmt* last = Stmts[Stmts.size() -1];
+    if (numStmts() == 0) return 0;
+
+    Stmt* last = stmts[numStmts() -1];
+
+    // TODO handle goto statement as last statement
+    while (1) {
         switch (last->getKind()) {
         case STMT_LABEL:
-        {
-            LabelStmt* label = cast<LabelStmt>(last);
-            // TODO handle compound substatements
-            return label->getSubStmt();
-        }
+            last = cast<LabelStmt>(last)->getSubStmt();
+            break;
         case STMT_COMPOUND:
-        {
-            CompoundStmt* compound = cast<CompoundStmt>(last);
-            return compound->getLastStmt();
-        }
+            return cast<CompoundStmt>(last)->getLastStmt();
         default:
             return last;
         }
     }
+}
+
+
+DeclStmt::DeclStmt(VarDecl* decl_)
+    : Stmt(STMT_DECL)
+    , decl(decl_)
+{}
+
+void DeclStmt::print(StringBuilder& buffer, unsigned indent) const {
+    buffer.indent(indent);
+    buffer.setColor(COL_STMT);
+    buffer << "DeclStmt\n";
+    decl->print(buffer, indent + INDENT);
+}
+
+SourceLocation DeclStmt::getLocation() const {
+    return decl->getLocation();
+}
+
+const char* DeclStmt::getName() const {
+    return decl->getName();
 }
 

@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@
 #define BUILDER_RECIPE_READER_H
 
 #include <stdarg.h>
-#include <string>
 #include <vector>
 
 namespace C2 {
@@ -38,6 +37,7 @@ private:
     void handleLine(char* line);
     char* get_token();
     void error(const char *fmt, ...);
+    void checkCurrent();
 
     typedef std::vector<Recipe*> Recipes;
     Recipes recipes;

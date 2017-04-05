@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,23 +13,21 @@
  * limitations under the License.
  */
 
-#include <unistd.h>
-#include <limits.h>
-#include <stdlib.h>
 #include <stdio.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <string.h>
+#include <unistd.h>
+#include <stdlib.h>
 
 #include "Builder/Recipe.h"
 #include "Builder/RecipeReader.h"
+#include "Builder/BuilderConstants.h"
+
 #include "FileUtils/FileMap.h"
+#include "AST/Component.h"
 
 using namespace C2;
-
-const char* RECIPE_FILE = "recipe.txt";
 
 RecipeReader::RecipeReader()
     : current(0)
@@ -37,7 +35,6 @@ RecipeReader::RecipeReader()
     , state(START)
     , token_ptr(0)
 {
-    findTopDir();
     readRecipeFile();
 }
 
@@ -46,37 +43,6 @@ RecipeReader::~RecipeReader() {
         delete recipes[i];
     }
 }
-
-void RecipeReader::findTopDir() {
-    char rpath[PATH_MAX];
-    while (1) {
-        char* path = getcwd(rpath, PATH_MAX);
-        if (path == NULL) {
-            perror("getcwd");
-            exit(-1);
-        }
-        struct stat buf;
-        int err = stat(RECIPE_FILE, &buf);
-        if (err) {
-            if (rpath[0] == '/' && rpath[1] == 0) {
-                fprintf(stderr, "cannot find recipe file\n");
-                exit(-1);
-            }
-            if (errno != ENOENT) {
-                perror("stat");
-                exit(-1);
-            }
-        } else {
-            return;
-        }
-        err = chdir("..");
-        if (err) {
-            perror("chdir");
-            exit(-1);
-        }
-    }
-}
-
 
 void RecipeReader::readRecipeFile() {
     FileMap file(RECIPE_FILE);
@@ -103,29 +69,39 @@ void RecipeReader::readRecipeFile() {
     }
 }
 
-
 void RecipeReader::handleLine(char* line) {
     if (line[0] == '#') return; // skip comments
 
     switch (state) {
     case START:
         {
-            // line should be 'TARGET <name>'
+            // line should be 'executable/lib <name>'
             const char* kw = get_token();
-            if (strcmp(kw, "target") == 0) {
+            if (strcmp(kw, "executable") == 0) {
                 const char* target_name = get_token();
-                if (target_name == 0) error("expected target name");
-                current = new Recipe(target_name, true);
+                if (target_name == 0) error("expected executable name");
+                current = new Recipe(target_name, Component::EXECUTABLE);
                 recipes.push_back(current);
                 state = INSIDE_TARGET;
             } else if (strcmp(kw, "lib") == 0) {
                 const char* target_name = get_token();
-                if (target_name == 0) error("expected lib name");
-                current = new Recipe(target_name, false);
+                if (target_name == 0) error("expected library name");
+                const char* type_name = get_token();
+                if (type_name == 0) error("expected library type");
+
+                Component::Type type = Component::SHARED_LIB;
+                if (strcmp(type_name, "shared") == 0) {
+                    type = Component::SHARED_LIB;
+                } else if (strcmp(type_name, "static") == 0) {
+                    type = Component::STATIC_LIB;
+                } else {
+                    error("unknown library type '%s'", type_name);
+                }
+                current = new Recipe(target_name, type);
                 recipes.push_back(current);
                 state = INSIDE_TARGET;
             } else {
-                error("expected keyword target|lib");
+                error("expected keyword executable|lib");
             }
         }
         break;
@@ -142,7 +118,16 @@ void RecipeReader::handleLine(char* line) {
                         // TODO check duplicate configs
                         current->addConfig(tok2);
                     }
-                } else if (strcmp(tok, "ansi-c") == 0) {
+                } else if (strcmp(tok, "export") == 0) {
+                    while (1) {
+                        const char* tok2 = get_token();
+                        if (!tok2) break;
+                        if (current->hasExported(tok2)) {
+                            error("duplicate module '%s'", tok2);
+                        }
+                        current->addExported(tok2);
+                    }
+                } else if (strcmp(tok, "generate-c") == 0) {
                     current->generateCCode = true;
                     while (1) {
                         const char* tok2 = get_token();
@@ -150,7 +135,8 @@ void RecipeReader::handleLine(char* line) {
                         // TODO check duplicate configs
                         current->addAnsiCConfig(tok2);
                     }
-                } else if (strcmp(tok, "codegen") == 0) {
+                } else if (strcmp(tok, "generate-ir") == 0) {
+                    current->generateIR = true;
                     while (1) {
                         const char* tok2 = get_token();
                         if (!tok2) break;
@@ -172,18 +158,48 @@ void RecipeReader::handleLine(char* line) {
                         // TODO check duplicate configs
                         current->addDepsConfig(tok2);
                     }
+                } else if (strcmp(tok, "refs") == 0) {
+                    current->generateRefs = true;
+                } else if (strcmp(tok, "nolibc") == 0) {
+                    current->noLibC = true;
+                } else if (strcmp(tok, "use") == 0) {
+                    // syntax: $use <libname> <type>,  type = static/dynamic
+                    const char* tok2 = get_token();
+                    if (!tok2) error("missing library name");
+                    std::string libname = tok2;
+                    const char* tok3 = get_token();
+                    if (!tok3) error("missing library type");
+                    Component::Type libtype = Component::SHARED_LIB;
+                    if (strcmp(tok3, "static") == 0) {
+                        libtype = Component::STATIC_LIB;
+                    } else if (strcmp(tok3, "dynamic") == 0) {
+                        libtype = Component::SHARED_LIB;
+                    } else {
+                        error("unknown library type '%s'", tok3);
+                    }
+                    if (current->name == libname) {
+                        error("cannot have dependency on self for target %s", libname.c_str());
+                    }
+                    if (current->hasLibrary(libname)) {
+                        error("duplicate dependency for %s", libname.c_str());
+                    }
+                    current->addLibrary(libname, libtype);
                 } else {
                     error("unknown option '%s'", tok);
                 }
             } else if (strcmp(tok, "end") == 0) {
+                checkCurrent();
                 state = START;
                 current = 0;
             } else {
                 struct stat buf;
                 int err = stat(tok, &buf);
                 if (err) {
-                    // TODO also check read rights (access() )
                     error("file '%s' does not exist", tok);
+                }
+                err = access(tok, R_OK);
+                if (err) {
+                	error("missing read permissions for file: %s", tok);
                 }
                 current->addFile(tok);
             }
@@ -236,6 +252,24 @@ void RecipeReader::print() const {
     for (unsigned i=0; i<recipes.size(); i++) {
         Recipe* R = recipes[i];
         printf("  %s\n", R->name.c_str());
+    }
+}
+
+void RecipeReader::checkCurrent() {
+    // lib targets must have export entry
+    bool needExport = false;
+    switch (current->type) {
+    case Component::EXECUTABLE:
+        needExport = false;
+        break;
+    case Component::SHARED_LIB:
+    case Component::STATIC_LIB:
+        needExport = true;
+        break;
+    }
+    if (needExport && current->exported.size() == 0) {
+        fprintf(stderr, "recipe: target %s is type lib but has no 'export' entry\n", current->name.c_str());
+        exit(-1);
     }
 }
 

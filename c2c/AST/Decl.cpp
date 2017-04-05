@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,61 +18,149 @@
 #include "AST/Decl.h"
 #include "AST/Stmt.h"
 #include "AST/Expr.h"
-#include "Utils/StringBuilder.h"
-#include "Utils/Utils.h"
+#include "AST/Attr.h"
+#include "AST/ASTContext.h"
+#include "AST/Module.h"
 #include "Utils/color.h"
-#include "Utils/constants.h"
+#include "Utils/StringBuilder.h"
+#include "Utils/UtilsConstants.h"
 
 using namespace C2;
 using namespace std;
 
-//#define DECL_DEBUG
 
-#ifdef DECL_DEBUG
-static int creationCount;
-static int deleteCount;
-#endif
-
-Decl::Decl(DeclKind k, const std::string& name_, SourceLocation loc_, QualType type_, bool is_public, unsigned file_id)
-    : name(name_)
-    , loc(loc_)
+Decl::Decl(DeclKind k, const char* name_, SourceLocation loc_, QualType type_, bool is_public)
+    : loc(loc_)
     , type(type_)
-    , BitsInit(0)
+    , name(name_)
     , mod(0)
 {
-    DeclBits.dKind = k;
-    DeclBits.DeclIsPublic = is_public;
-    DeclBits.DeclFileID = file_id;
-#ifdef DECL_DEBUG
-    creationCount++;
-    fprintf(stderr, "[DECL] create %p  created %d deleted %d\n", this, creationCount, deleteCount);
-#endif
+    declBits.dKind = k;
+    declBits.IsExported = 0;
+    declBits.IsPublic = is_public;
+    declBits.IsUsed = 0;
+    declBits.IsUsedPublic = 0;
+    declBits.HasAttributes = 0;
 }
 
-Decl::~Decl() {
-#ifdef DECL_DEBUG
-    deleteCount++;
-    fprintf(stderr, "[DECL] delete %p  created %d deleted %d\n", this, creationCount, deleteCount);
-#endif
+void Decl::fullName(StringBuilder& output) const {
+    assert(mod);
+    output << mod->getName() << '_' << name;
+}
+
+string Decl::DiagName() const {
+    StringBuilder tmp(128);
+    tmp << '\'';
+    if (mod) {
+        tmp << mod->getName() << '.';
+    }
+    tmp << name;
+    tmp << '\'';
+    return tmp.c_str();
+}
+
+void Decl::printAttributes(StringBuilder& buffer, unsigned indent) const {
+    if (isExported()) {
+        buffer.indent(indent);
+        buffer.setColor(COL_ATTRIBUTES);
+        buffer << "exported\n";
+    }
+    if (!hasAttributes()) return;
+    buffer.indent(indent);
+    buffer.setColor(COL_ATTRIBUTES);
+    buffer << "Attributes: ";
+    if (mod) {
+        const AttrList& AL = mod->getAttributes(this);
+        for (AttrListConstIter iter = AL.begin(); iter != AL.end(); ++iter) {
+            if (iter != AL.begin()) buffer << ", ";
+            (*iter)->print(buffer);
+        }
+    } else {
+        buffer << "<NO MODULE>";
+    }
+    buffer << '\n';
+}
+
+void Decl::print(StringBuilder& buffer, unsigned indent) const {
+    switch (getKind()) {
+    case DECL_FUNC:
+        cast<FunctionDecl>(this)->print(buffer, indent);
+        break;
+    case DECL_VAR:
+        cast<VarDecl>(this)->print(buffer, indent);
+        break;
+    case DECL_ENUMVALUE:
+        cast<EnumConstantDecl>(this)->print(buffer, indent);
+        break;
+    case DECL_ALIASTYPE:
+        cast<AliasTypeDecl>(this)->print(buffer, indent);
+        break;
+    case DECL_STRUCTTYPE:
+        cast<StructTypeDecl>(this)->print(buffer, indent);
+        break;
+    case DECL_ENUMTYPE:
+        cast<EnumTypeDecl>(this)->print(buffer, indent);
+        break;
+    case DECL_FUNCTIONTYPE:
+        cast<FunctionTypeDecl>(this)->print(buffer, indent);
+        break;
+    case DECL_ARRAYVALUE:
+        cast<ArrayValueDecl>(this)->print(buffer, indent);
+        break;
+    case DECL_IMPORT:
+        cast<ImportDecl>(this)->print(buffer, indent);
+        break;
+    case DECL_LABEL:
+        cast<LabelDecl>(this)->print(buffer, indent);
+        break;
+    }
+}
+
+void* Decl::operator new(size_t bytes, const C2::ASTContext& C, unsigned alignment) {
+    return ::operator new(bytes, C, alignment);
 }
 
 void Decl::dump() const {
     StringBuilder buffer;
     print(buffer, 0);
-    printf("%s\n", (const char*) buffer);
+    printf("%s\n", buffer.c_str());
 }
 
+void Decl::printPublic(StringBuilder& buffer) const {
+    if (isPublic()) {
+        buffer.setColor(COL_ATTR);
+        buffer << " public";
+    }
+}
 
-FunctionDecl::FunctionDecl(const std::string& name_, SourceLocation loc_,
-                           bool is_public, unsigned file_id, QualType rtype_)
-    : Decl(DECL_FUNC, name_, loc_, QualType(), is_public, file_id)
+bool Decl::hasAttribute(AttrKind kind) const {
+    if (!hasAttributes()) return false;
+    const AttrList& AL = getAttributes();
+    for (AttrListConstIter iter = AL.begin(); iter != AL.end(); ++iter) {
+        const Attr* A = (*iter);
+        if (A->getKind() == kind) return true;
+    }
+    return false;
+}
+
+const AttrList& Decl::getAttributes() const {
+    assert(hasAttributes());
+    return mod->getAttributes(this);
+}
+
+FunctionDecl::FunctionDecl(const char* name_, SourceLocation loc_,
+                           bool is_public, QualType rtype_)
+    : Decl(DECL_FUNC, name_, loc_, QualType(), is_public)
     , rtype(rtype_)
+    , origRType(rtype_)
+    , args(0)
     , body(0)
     , IRProto(0)
-{}
-
-FunctionDecl::~FunctionDecl() {
-    delete body;
+{
+    functionDeclBits.structFuncNameOffset= 0;
+    functionDeclBits.numArgs = 0;
+    functionDeclBits.IsVariadic = 0;
+    functionDeclBits.HasDefaultArgs = 0;
 }
 
 void FunctionDecl::print(StringBuilder& buffer, unsigned indent) const {
@@ -80,32 +168,39 @@ void FunctionDecl::print(StringBuilder& buffer, unsigned indent) const {
     buffer.setColor(COL_DECL);
     buffer << "FunctionDecl ";
     type.print(buffer);
+    printPublic(buffer);
     buffer.setColor(COL_VALUE);
     buffer << ' ' << name;
     buffer << '\n';
-    for (unsigned i=0; i<args.size(); i++) {
+    for (unsigned i=0; i<numArgs(); i++) {
         args[i]->print(buffer, indent + INDENT);
     }
+    printAttributes(buffer, indent + INDENT);
     if (body) body->print(buffer, INDENT);
 }
 
-VarDecl* FunctionDecl::findArg(const std::string& name) const {
-    for (unsigned i=0; i<args.size(); i++) {
-        VarDecl* arg = args[i];
-        if (arg->getName() == name) return arg;
-    }
-    return 0;
-}
-
 unsigned FunctionDecl::minArgs() const {
-    if (!hasDefaultArgs()) return args.size();
+    if (!hasDefaultArgs()) return numArgs();
 
     unsigned i;
-    for (i=0; i<args.size(); i++) {
+    for (i=0; i<numArgs(); i++) {
         VarDecl* arg = args[i];
         if (arg->getInitValue()) break;
     }
     return i;
+}
+
+bool FunctionDecl::sameProto(const FunctionDecl* lhs, const FunctionDecl* rhs) {
+    if (lhs->rtype != rhs->rtype) return false;
+    if (lhs->numArgs() != rhs->numArgs()) return false;
+    if (lhs->isVariadic() != rhs->isVariadic()) return false;
+
+    for (unsigned i=0; i<lhs->numArgs(); i++) {
+        const VarDecl* leftArg = lhs->getArg(i);
+        const VarDecl* rightArg = rhs->getArg(i);
+        if (leftArg->getType() != rightArg->getType()) return false;
+    }
+    return true;
 }
 
 
@@ -116,20 +211,19 @@ static const char* VarDeclKind2Str(VarDeclKind k) {
     case VARDECL_PARAM:  return "param";
     case VARDECL_MEMBER: return "member";
     }
+    assert(0);
 }
 
 
-VarDecl::VarDecl(VarDeclKind k_, const std::string& name_, SourceLocation loc_,
-            QualType type_, Expr* initValue_, bool is_public, unsigned file_id)
-    : Decl(DECL_VAR, name_, loc_, type_, is_public, file_id)
+VarDecl::VarDecl(VarDeclKind k_, const char* name_, SourceLocation loc_,
+                 QualType type_, Expr* initValue_, bool is_public)
+    : Decl(DECL_VAR, name_, loc_, type_, is_public)
+    , origType(type_)
     , initValue(initValue_)
     , IRValue(0)
 {
-    DeclBits.varDeclKind = k_;
-}
-
-VarDecl::~VarDecl() {
-    delete initValue;
+    varDeclBits.Kind = k_;
+    varDeclBits.HasLocalQualifier = 0;
 }
 
 void VarDecl::print(StringBuilder& buffer, unsigned indent) const {
@@ -139,42 +233,24 @@ void VarDecl::print(StringBuilder& buffer, unsigned indent) const {
     type.print(buffer);
     buffer.setColor(COL_ATTR);
     buffer << ' ' << VarDeclKind2Str(getVarKind());
+    printPublic(buffer);
     buffer.setColor(COL_VALUE);
     buffer << ' ' << name << '\n';
+    printAttributes(buffer, indent + INDENT);
 
     if (hasLocalQualifier()) buffer << " LOCAL";
     indent += INDENT;
     if (initValue) initValue->print(buffer, indent);
-#if 0
-    // TODO move
-    if (initValues.size()) {
-        buffer.indent(INDENT);
-        for (InitValuesConstIter iter=initValues.begin(); iter != initValues.end(); ++iter) {
-            (*iter)->getExpr()->print(buffer, INDENT);
-        }
-    }
-#endif
 }
 
-#if 0
-void VarDecl::addInitValue(ArrayValueDecl* value) {
-    initValues.push_back(value);
-}
-#endif
 
-
-EnumConstantDecl::EnumConstantDecl(const std::string& name_, SourceLocation loc_,
+EnumConstantDecl::EnumConstantDecl(const char* name_, SourceLocation loc_,
                                    QualType type_, Expr* Init,
-                                   bool is_public, unsigned file_id)
-    : Decl(DECL_ENUMVALUE, name_, loc_, type_, is_public, file_id)
+                                   bool is_public)
+    : Decl(DECL_ENUMVALUE, name_, loc_, type_, is_public)
     , InitVal(Init)
     , Val(64, false)
-{
-}
-
-EnumConstantDecl::~EnumConstantDecl() {
-    delete InitVal;
-}
+{}
 
 void EnumConstantDecl::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
@@ -188,9 +264,9 @@ void EnumConstantDecl::print(StringBuilder& buffer, unsigned indent) const {
 }
 
 
-TypeDecl::TypeDecl(DeclKind k, const std::string& name_, SourceLocation loc_, QualType type_,
-                   bool is_public, unsigned file_id)
-    : Decl(k, name_, loc_, type_, is_public, file_id)
+TypeDecl::TypeDecl(DeclKind k, const char* name_, SourceLocation loc_, QualType type_,
+                   bool is_public)
+    : Decl(k, name_, loc_, type_, is_public)
 {}
 
 
@@ -198,25 +274,68 @@ void AliasTypeDecl::print(StringBuilder& buffer, unsigned indent) const {
     buffer.setColor(COL_DECL);
     buffer << "AliasTypeDecl ";
     type.print(buffer);
+    printPublic(buffer);
     buffer.setColor(COL_VALUE);
     buffer << ' ' << name;
     buffer.setColor(COL_ATTR); buffer << " refType: "; refType.print(buffer);
     buffer << '\n';
+    printAttributes(buffer, indent + INDENT);
 }
 
 
-StructTypeDecl::StructTypeDecl(const std::string& name_, SourceLocation loc_,
-                             QualType type_, bool is_struct, bool is_global,
-                             bool is_public, unsigned file_id)
-    : TypeDecl(DECL_STRUCTTYPE, name_, loc_, type_, is_public, file_id)
+StructTypeDecl::StructTypeDecl(const char* name_, SourceLocation loc_,
+                               QualType type_, bool is_struct, bool is_global,
+                               bool is_public)
+    : TypeDecl(DECL_STRUCTTYPE, name_, loc_, type_, is_public)
+    , members(0)
+    , structFunctions(0)
 {
-    DeclBits.StructTypeIsStruct = is_struct;
-    DeclBits.StructTypeIsGlobal = is_global;
+    structTypeDeclBits.numMembers = 0;
+    structTypeDeclBits.numStructFunctions = 0;
+    structTypeDeclBits.IsStruct = is_struct;
+    structTypeDeclBits.IsGlobal = is_global;
 }
 
-void StructTypeDecl::addMember(Decl* D) {
-    assert(isa<VarDecl>(D) || isa<StructTypeDecl>(D));
-    members.push_back(D);
+Decl* StructTypeDecl::find(const char* name_) const {
+    // normal members
+    for (unsigned i=0; i<numMembers(); i++) {
+        Decl* D = members[i];
+        if (strcmp(D->getName(), name_) == 0) return D;
+        if (D->hasEmptyName()) {      // empty string
+            assert(isa<StructTypeDecl>(D));
+            StructTypeDecl* sub = cast<StructTypeDecl>(D);
+            D = sub->find(name_);
+            if (D) return D;
+        }
+    }
+
+    return findFunction(name_);
+}
+
+Decl* StructTypeDecl::findFunction(const char* name_) const {
+    // struct-functions
+    for (unsigned i=0; i<numStructFunctions(); i++) {
+        FunctionDecl* F = structFunctions[i];
+        if (F->matchesStructFuncName(name_)) return F;
+    }
+    return 0;
+}
+
+int StructTypeDecl::findIndex(const char*  name_) const {
+    for (unsigned i=0; i<numMembers(); i++) {
+        Decl* D = members[i];
+        if (strcmp(D->getName(), name_) == 0) return i;
+    }
+    return -1;
+}
+
+void StructTypeDecl::setOpaqueMembers() {
+    for (unsigned i=0; i<numMembers(); i++) {
+        Decl* D = members[i];
+        D->setPublic(false);
+        StructTypeDecl* subStruct = dyncast<StructTypeDecl>(D);
+        if (subStruct) subStruct->setOpaqueMembers();
+    }
 }
 
 void StructTypeDecl::print(StringBuilder& buffer, unsigned indent) const {
@@ -225,10 +344,15 @@ void StructTypeDecl::print(StringBuilder& buffer, unsigned indent) const {
     buffer << "StructTypeDecl (";
     if (isStruct()) buffer << "struct";
     else buffer << "union";
-    buffer << ") ";
+    buffer << ")";
+    printPublic(buffer);
     buffer.setColor(COL_VALUE);
-    buffer << name << '\n';
-    for (unsigned i=0; i<members.size(); i++) {
+    buffer << ' ';
+    if (name[0] != 0) buffer << name;
+    else buffer << "<anonymous>";
+    buffer << '\n';
+    printAttributes(buffer, indent + INDENT);
+    for (unsigned i=0; i<numMembers(); i++) {
         members[i]->print(buffer, indent + INDENT);
     }
 }
@@ -239,41 +363,71 @@ void EnumTypeDecl::print(StringBuilder& buffer, unsigned indent) const {
     buffer.setColor(COL_DECL);
     buffer << "EnumTypeDecl ";
     type.print(buffer);
+    printPublic(buffer);
     buffer.setColor(COL_VALUE);
     buffer << ' ' << name;
+    if (isIncremental()) buffer << " incremental";
     buffer << '\n';
-    for (unsigned i=0; i<constants.size(); i++) {
+    printAttributes(buffer, indent + INDENT);
+    for (unsigned i=0; i<numConstants(); i++) {
         constants[i]->print(buffer, indent + INDENT);
     }
 }
 
+int EnumTypeDecl::getIndex(const EnumConstantDecl* c) const {
+    for (unsigned i=0; i<numConstants(); i++) {
+        if (constants[i] == c) return i;
+    }
+    return -1;
+}
 
-FunctionTypeDecl::FunctionTypeDecl(FunctionDecl* F, unsigned file_id)
-    : TypeDecl(DECL_FUNCTIONTYPE, F->getName(), F->getLocation(), F->getType(), F->isPublic(), file_id)
+bool EnumTypeDecl::hasConstantValue(llvm::APSInt Val) const {
+    for (unsigned i=0; i<numConstants(); i++) {
+        if (constants[i]->getValue() == Val) return true;
+    }
+    return false;
+}
+
+llvm::APSInt EnumTypeDecl::getMinValue() const {
+    assert(numConstants() != 0);
+    llvm::APSInt min = constants[0]->getValue();
+    for (unsigned i=1; i<numConstants(); i++) {
+        llvm::APSInt cur = constants[i]->getValue();
+        if (cur < min) min = cur;
+    }
+    return min;
+}
+
+llvm::APSInt EnumTypeDecl::getMaxValue() const {
+    assert(numConstants() != 0);
+    llvm::APSInt max = constants[0]->getValue();
+    for (unsigned i=1; i<numConstants(); i++) {
+        llvm::APSInt cur = constants[i]->getValue();
+        if (cur > max) max = cur;
+    }
+    return max;
+}
+
+
+FunctionTypeDecl::FunctionTypeDecl(FunctionDecl* F)
+    : TypeDecl(DECL_FUNCTIONTYPE, F->getName(), F->getLocation(), F->getType(), F->isPublic())
     , func(F)
-{}
-
-FunctionTypeDecl::~FunctionTypeDecl() {
-    delete func;
+{
 }
 
 void FunctionTypeDecl::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
     buffer.setColor(COL_DECL);
     buffer << "FunctionTypeDecl\n";
+    printAttributes(buffer, indent + INDENT);
     func->print(buffer, indent + INDENT);
 }
 
 
-ArrayValueDecl::ArrayValueDecl(const std::string& name_, SourceLocation loc_,
-                               Expr* value_)
-    : Decl(DECL_ARRAYVALUE, name_, loc_, QualType(), false, 0)
+ArrayValueDecl::ArrayValueDecl(const char* name_, SourceLocation loc_, Expr* value_)
+    : Decl(DECL_ARRAYVALUE, name_, loc_, QualType(), false)
     , value(value_)
 {}
-
-ArrayValueDecl::~ArrayValueDecl() {
-    delete value;
-}
 
 void ArrayValueDecl::print(StringBuilder& buffer, unsigned indent) const {
     buffer.indent(indent);
@@ -284,13 +438,14 @@ void ArrayValueDecl::print(StringBuilder& buffer, unsigned indent) const {
     value->print(buffer, INDENT);
 }
 
-ImportDecl::ImportDecl(const std::string& name_, SourceLocation loc_, bool isLocal_,
-                 const std::string& modName_, SourceLocation aliasLoc_)
-    : Decl(DECL_IMPORT, name_, loc_, QualType(), false, 0)
+
+ImportDecl::ImportDecl(const char* name_, SourceLocation loc_, bool isLocal_,
+                       const char* modName_, SourceLocation aliasLoc_)
+    : Decl(DECL_IMPORT, name_, loc_, QualType(), false)
     , modName(modName_)
     , aliasLoc(aliasLoc_)
 {
-    DeclBits.ImportIsLocal = isLocal_;
+    importDeclBits.IsLocal = isLocal_;
 }
 
 void ImportDecl::print(StringBuilder& buffer, unsigned indent) const {
@@ -300,6 +455,27 @@ void ImportDecl::print(StringBuilder& buffer, unsigned indent) const {
     buffer << modName;
     if (aliasLoc.isValid()) buffer << " as " << name;
     if (isLocal()) buffer << " local";
+    buffer.setColor(COL_ATTRIBUTES);
+    buffer << "  used=" << isUsed() << '/' << isUsedPublic();
+    if (getModule()) {
+        buffer << " module=" << getModule()->getName();
+    } else {
+        buffer << " NO MODULE";
+    }
     buffer << '\n';
+}
+
+
+LabelDecl::LabelDecl(const char* name_, SourceLocation loc_)
+    : Decl(DECL_LABEL, name_, loc_, QualType(), false)
+    , TheStmt(0)
+{}
+
+void LabelDecl::print(StringBuilder& buffer, unsigned indent) const {
+    buffer.setColor(COL_DECL);
+    buffer << "LabelDecl ";
+    buffer.setColor(COL_VALUE);
+    buffer << name << '\n';
+    if (TheStmt) TheStmt->print(buffer, indent+INDENT);
 }
 

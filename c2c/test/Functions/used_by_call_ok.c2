@@ -1,8 +1,0 @@
-module test;
-
-func void test1() {}
-
-public func void main() {
-    test1();
-}
-

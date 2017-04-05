@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 
 #include "Utils/StringBuilder.h"
 
@@ -80,43 +81,35 @@ StringBuilder& StringBuilder::operator<<(char input) {
     return *this;
 }
 
-StringBuilder& StringBuilder::operator<<(int input) {
+StringBuilder& StringBuilder::operator<<(int32_t input) {
 #ifdef SIZE_DEBUG
     assert(10 < space_left() && "buffer overflow");
 #endif
-    ptr += sprintf(ptr, "%d", input);
+    ptr += sprintf(ptr, "%" PRId32"", input);
     return *this;
 }
 
-StringBuilder& StringBuilder::operator<<(unsigned input) {
+StringBuilder& StringBuilder::operator<<(uint32_t input) {
 #ifdef SIZE_DEBUG
     assert(10 < space_left() && "buffer overflow");
 #endif
-    ptr += sprintf(ptr, "%u", input);
+    ptr += sprintf(ptr, "%" PRIu32"", input);
     return *this;
 }
 
-StringBuilder& StringBuilder::operator<<(long input) {
+StringBuilder& StringBuilder::operator<<(int64_t input) {
 #ifdef SIZE_DEBUG
     assert(10 < space_left() && "buffer overflow");
 #endif
-    ptr += sprintf(ptr, "%ld", input);
+    ptr += sprintf(ptr, "%" PRId64"", input);
     return *this;
 }
 
-StringBuilder& StringBuilder::operator<<(long long input) {
+StringBuilder& StringBuilder::operator<<(uint64_t input) {
 #ifdef SIZE_DEBUG
     assert(10 < space_left() && "buffer overflow");
 #endif
-    ptr += sprintf(ptr, "%lld", input);
-    return *this;
-}
-
-StringBuilder& StringBuilder::operator<<(unsigned long long input) {
-#ifdef SIZE_DEBUG
-    assert(10 < space_left() && "buffer overflow");
-#endif
-    ptr += sprintf(ptr, "%llu", input);
+    ptr += sprintf(ptr, "%" PRIu64"", input);
     return *this;
 }
 
@@ -136,13 +129,49 @@ void StringBuilder::clear() {
     buffer[0] = 0;
 }
 
-unsigned StringBuilder::size() const { return (unsigned)(ptr - buffer); }
+void StringBuilder::print(const char* format, ...) {
+    va_list(Args);
+    va_start(Args, format);
+    unsigned len = vsprintf(ptr, format, Args);
+#ifdef SIZE_DEBUG
+    assert(len < space_left() && "buffer overflow");
+#endif
+    va_end(Args);
+    ptr += len;
+    *ptr = 0;
+}
 
-unsigned StringBuilder::space_left() const { return capacity - size(); }
-
-StringBuilder::operator const char*() const { return buffer; }
-
-bool StringBuilder::isEmpty() const { return (size() == 0); }
+void StringBuilder::number(unsigned radix_, int64_t value) {
+    char temp[80];
+    switch (radix_) {
+    case 2:
+    {
+        char* cp = &temp[2];
+        temp[0] = '0';
+        temp[1] = 'b';
+        bool show = false;
+        for (int i=63; i>0; i--) {
+            if (value & (1lu<<i)) show = true;
+            if (show) {
+                *cp++ = ((value & (1lu<<i)) ? '1' : '0');
+            }
+        }
+        *cp++ = ((value & (1lu<<0)) ? '1' : '0');
+        *cp = 0;
+    }
+    break;
+    case 8:
+        sprintf(temp, "0%" PRIo64, value);
+        break;
+    case 10:
+        sprintf(temp, "%" PRId64, value);
+        break;
+    case 16:
+        sprintf(temp, "0x%" PRIX64, value);
+        break;
+    }
+    (*this) << temp;
+}
 
 void StringBuilder::strip(char c) {
     if (size() > 0 && *(ptr-1) == c) {

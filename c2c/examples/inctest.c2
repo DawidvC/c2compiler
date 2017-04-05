@@ -1,5 +1,0 @@
-#include "macros.c2h"
-
-MODULE inctest;
-
-public func int main() { return 0; }

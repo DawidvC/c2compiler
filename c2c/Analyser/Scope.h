@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,10 +16,9 @@
 #ifndef ANALYSER_SCOPE_H
 #define ANALYSER_SCOPE_H
 
-#include <string>
 #include <map>
+#include <string>
 #include <vector>
-#include <stdint.h>
 
 #include "AST/Module.h"
 
@@ -85,14 +84,15 @@ public:
     Scope(const std::string& name_, const Modules& modules_, clang::DiagnosticsEngine& Diags_);
 
     // adding symbols
-    bool addImportDecl(ImportDecl* importDecl);
+    void addImportDecl(ImportDecl* importDecl);
     bool checkScopedSymbol(const VarDecl* V) const;
     void addScopedSymbol(VarDecl* V);
 
     // searching
-    const Module* findUsedModule(const std::string& name, clang::SourceLocation loc) const;
-    Decl* findSymbol(const std::string& name, clang::SourceLocation loc, bool isType) const;
+    const Module* findUsedModule(const std::string& name, clang::SourceLocation loc, bool usedPublic) const;
+    Decl* findSymbol(const std::string& name, clang::SourceLocation loc, bool isType, bool usedPublic) const;
     Decl* findSymbolInModule(const std::string& name, clang::SourceLocation loc, const Module* mod) const;
+    void checkAccess(Decl* D, clang::SourceLocation loc) const;
 
     // Scopes
     void EnterScope(unsigned flags);
@@ -106,7 +106,7 @@ public:
     }
 
 private:
-    const Module* findAnyModule(const std::string& name) const;
+    const Module* findAnyModule(const char* name) const;
     Decl* findOwn(const std::string& symbol) const;
     //Decl* findSymbolInUsed(const std::string& name) const;
 
@@ -128,7 +128,6 @@ private:
 
     // all modules
     const Modules& allModules;
-
     const Module* myModule;
 
     // Symbol caches

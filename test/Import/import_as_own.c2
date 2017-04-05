@@ -1,0 +1,4 @@
+module test;               // @note{previous definition is here}
+import other as
+    test;      // @error{redefinition of test}
+

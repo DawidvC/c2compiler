@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,19 +22,21 @@
 #include "Utils/StringBuilder.h"
 
 using namespace C2;
+using namespace llvm;
 
 void FileUtils::writeFile(const char* pathstr, const std::string& filename, const StringBuilder& content) {
-    bool existed;
+    bool ignoreExisting = true;
     llvm::Twine path(pathstr);
-    if (llvm::sys::fs::create_directories(path, existed) != llvm::errc::success) {
-        fprintf(stderr, "Could not create directory: %s\n", filename.c_str());
+    if (std::error_code ec = llvm::sys::fs::create_directories(path, ignoreExisting)) {
+        llvm::errs() << "warning: could not create directory '"
+                     << path << "': " << ec.message() << '\n';
         return;
     }
 
-    std::string ErrorInfo;
-    llvm::raw_fd_ostream OS(filename.c_str(), ErrorInfo);
-    if (!ErrorInfo.empty()) {
-        fprintf(stderr, "%s\n", ErrorInfo.c_str());
+    std::error_code EC;
+    llvm::raw_fd_ostream OS(filename.c_str(), EC, sys::fs::F_None);
+    if (EC) {
+        fprintf(stderr, "error opening %s for writing: %s\n", filename.c_str(), EC.message().c_str());
         return;
     }
     OS << content;

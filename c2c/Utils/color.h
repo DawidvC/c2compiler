@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -61,11 +61,12 @@
 // for AST printing
 #define COL_DECL  ANSI_BGREEN
 #define COL_STMT  ANSI_BMAGENTA
-#define COL_EXPR  ANSI_MAGENTA
+#define COL_EXPR  ANSI_BMAGENTA
 #define COL_TYPE  ANSI_GREEN
 #define COL_CANON ANSI_YELLOW
 #define COL_VALUE ANSI_BCYAN
 #define COL_ATTR  ANSI_BLUE
+#define COL_ATTRIBUTES ANSI_YELLOW
 #define COL_NORM  ANSI_NORMAL
 
 #endif

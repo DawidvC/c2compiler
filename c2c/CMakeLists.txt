@@ -1,14 +1,3 @@
-CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
-PROJECT(c2compiler)
-
-SET(CMAKE_CXX_COMPILER "clang++")
-#SET(CMAKE_CXX_COMPILER "g++")
-
-#SET(CMAKE_BUILD_TYPE Release)
-#SET(CMAKE_BUILD_TYPE Debug)
-#SET(CMAKE_VERBOSE_MAKEFILE true)
-ADD_DEFINITIONS(-Wall)
-#ADD_DEFINITIONS(-Wall -Wextra -Wno-overloaded-virtual -Wno-unused -Wno-unused-parameter)
 
 SET(LLVM_CONFIG_EXECUTABLE "llvm-config")
 
@@ -32,20 +21,24 @@ execute_process(
   OUTPUT_STRIP_TRAILING_WHITESPACE
 )
 
-SET(CLANG_LIBS "-lclangFrontend -lclangEdit -lclangLex -lclangBasic")
+SET(CLANG_LIBS "-lclangFrontend -lclangEdit -lclangLex -lclangBasic -lclangRewrite")
 
 INCLUDE_DIRECTORIES("${CMAKE_CURRENT_SOURCE_DIR}")
 #line below is needed for Ubuntu 13.04 32 bit
 INCLUDE_DIRECTORIES("/usr/include/i386-linux-gnu/c++/4.8/")
 
-ADD_EXECUTABLE(c2c
+ADD_LIBRARY(c2core
     AST/AST.cpp
     AST/Decl.cpp
     AST/Expr.cpp
     AST/Module.cpp
     AST/Stmt.cpp
     AST/Type.cpp
+    AST/Attr.cpp
+    AST/ASTContext.cpp
+    AST/Component.cpp
     Parser/C2Parser.cpp
+    Parser/ParserHelpers.cpp
     Parser/C2Sema.cpp
     Analyser/AnalyserUtils.cpp
     Analyser/Scope.cpp
@@ -55,24 +48,52 @@ ADD_EXECUTABLE(c2c
     Analyser/FunctionAnalyser.cpp
     Analyser/TypeFinder.cpp
     Analyser/ExprTypeAnalyser.cpp
-    CodeGen/CodeGenFunction.cpp
-    CodeGen/CodeGenModule.cpp
+    Analyser/ComponentAnalyser.cpp
+    Algo/DepVisitor.cpp
+    Algo/DepGenerator.cpp
+    Algo/ASTVisitor.cpp
+    Algo/TagWriter.cpp
+    IRGenerator/CodeGenFunction.cpp
+    IRGenerator/CodeGenModule.cpp
+    IRGenerator/InterfaceGenerator.cpp
     CGenerator/CCodeGenerator.cpp
-    Builder/C2Builder.cpp
+    CGenerator/MakefileGenerator.cpp
+    CGenerator/TypeSorter.cpp
+    CGenerator/CGenerator.cpp
+    Refactor/RefFinder.cpp
+    Builder/C2ModuleLoader.cpp
+    Builder/ManifestReader.cpp
+    Builder/ManifestWriter.cpp
+    Builder/LibraryLoader.cpp
+    Builder/RootFinder.cpp
     Builder/Recipe.cpp
-    Builder/DepVisitor.cpp
-    Builder/DepGenerator.cpp
     Builder/RecipeReader.cpp
+    Builder/C2Builder.cpp
     FileUtils/FileMap.cpp
     FileUtils/FileUtils.cpp
     Utils/StringBuilder.cpp
     Utils/Utils.cpp
     Utils/GenUtils.cpp
+    Utils/TargetInfo.cpp
+    Utils/ProcessUtils.cpp
+)
+SET_TARGET_PROPERTIES(c2core PROPERTIES COMPILE_FLAGS "${LLVM_CXXFLAGS}")
+
+ADD_EXECUTABLE(c2c
     main.cpp
 )
-# NOTE: pthread and dl are needed for sqlite3
-TARGET_LINK_LIBRARIES(c2c ${LLVM_LDFLAGS} ${CLANG_LIBS} ${LLVM_LIBS})
-SET_TARGET_PROPERTIES(c2c PROPERTIES COMPILE_FLAGS "${LLVM_CXXFLAGS} -Wno-covered-switch-default")
+TARGET_LINK_LIBRARIES(c2c c2core ${LLVM_LDFLAGS} ${CLANG_LIBS} ${LLVM_LIBS} dl pthread)
 
-ADD_CUSTOM_TARGET(test COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tester/tester test DEPENDS c2c WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
+
+if (APPLE OR CYGWIN)
+    TARGET_LINK_LIBRARIES(c2c ncurses)
+else()
+# on Ubuntu,  tinfo seems to needed from Feb'15 on Ubuntu 14.04..
+    TARGET_LINK_LIBRARIES(c2c tinfo)
+endif()
+
+#SET_TARGET_PROPERTIES(c2c PROPERTIES COMPILE_FLAGS "${LLVM_CXXFLAGS} -Wno-covered-switch-default")
+SET_TARGET_PROPERTIES(c2c PROPERTIES COMPILE_FLAGS "${LLVM_CXXFLAGS}")
+
+install(TARGETS c2c DESTINATION ${DESTDIR}/)
 

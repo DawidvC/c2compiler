@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,23 +16,19 @@
 #ifndef AST_STMT_H
 #define AST_STMT_H
 
-#include <string>
 #include <vector>
 
 #include <clang/Basic/SourceLocation.h>
 
-#include "AST/OwningVector.h"
 
 using clang::SourceLocation;
-
-namespace llvm {
-class Value;
-}
 
 namespace C2 {
 
 class StringBuilder;
 class Expr;
+class VarDecl;
+class ASTContext;
 
 enum StmtKind {
     STMT_RETURN = 0,
@@ -49,37 +45,195 @@ enum StmtKind {
     STMT_LABEL,
     STMT_GOTO,
     STMT_COMPOUND,
+    STMT_DECL,
 };
 
 
-class Stmt {
+class alignas(void*) Stmt {
 public:
     Stmt(StmtKind k);
-    virtual ~Stmt();
-    StmtKind getKind() const { return static_cast<StmtKind>(StmtBits.sKind); }
-    virtual void print(StringBuilder& buffer, unsigned indent) const = 0;
+    StmtKind getKind() const { return static_cast<StmtKind>(stmtBits.sKind); }
+    void print(StringBuilder& buffer, unsigned indent) const;
     void dump() const;
-    virtual SourceLocation getLocation() const = 0;
+    SourceLocation getLocation() const;
+
+protected:
+    // See Clang comments in include/clang/AST/Stmt.h about operator new/delete
+    void* operator new(size_t bytes) noexcept {
+        assert(0 && "Stmt cannot be allocated with regular 'new'");
+        return 0;
+    }
+    void operator delete(void* data) {
+        assert(0 && "Stmt cannot be released with regular 'delete'");
+    }
+
+public:
+    void* operator new(size_t bytes, const ASTContext& C, unsigned alignment = 8);
+    // placement operator, for sub-class specific allocators
+    void* operator new(size_t bytes, void* mem) noexcept { return mem; }
+
+    void operator delete(void*, const ASTContext& C, unsigned) noexcept {}
+    void operator delete(void*, const ASTContext* C, unsigned) noexcept {}
+    void operator delete(void*, size_t) noexcept {}
+    void operator delete(void*, void*) noexcept {}
 
 protected:
     class StmtBitfields {
-    public:
+        friend class Stmt;
+
         unsigned sKind : 8;
+    };
+    enum { NumStmtBits = 8 };
+
+    class SwitchStmtBitfields {
+        friend class SwitchStmt;
+        unsigned : NumStmtBits;
+
+        unsigned numCases : 32 - NumStmtBits;
+    };
+
+    class CaseStmtBitfields {
+        friend class CaseStmt;
+        unsigned : NumStmtBits;
+
+        unsigned numStmts : 32 - NumStmtBits;
+    };
+
+    class DefaultStmtBitfields {
+        friend class DefaultStmt;
+        unsigned : NumStmtBits;
+
+        unsigned numStmts : 32 - NumStmtBits;
+    };
+
+    class CompoundStmtBitfields {
+        friend class CompoundStmt;
+        unsigned : NumStmtBits;
+
+        unsigned numStmts : 32 - NumStmtBits;
+    };
+
+    class ExprBitfields {
+        friend class Expr;
+        unsigned : NumStmtBits;
+
         unsigned eKind : 8;
-        unsigned ExprIsCTC: 2;          // CTC_FULL -> value matters, CTC_NONE -> type matters
-        unsigned ExprIsConstant : 1;    // const :"bla", test, 3. Not const: test(). Depends: a
-        unsigned ExprImpCast: 4;
-        unsigned BoolLiteralValue : 1;
-        unsigned TypeExprIsLocal : 1;
-        unsigned BuiltInIsSizeOf: 1;
-        unsigned MemberExprIsArrow: 1;
-        unsigned MemberExprIsModPrefix: 1;
-        unsigned InitListHasDesignators : 1;
+        unsigned ImpCast: 4;
+        unsigned IsCTC: 2;          // CTC_FULL -> value matters, CTC_NONE -> type matters
+        unsigned IsConstant : 1;    // const :"bla", test, 3. Not const: test(). Depends: a
+    };
+    enum { NumExprBits = 16 + NumStmtBits };
+
+    class IdentifierExprBitfields {
+        friend class IdentifierExpr;
+        unsigned : NumExprBits;
+
+        unsigned IsType : 1;
+        unsigned IsStructFunction : 1;
+        unsigned haveDecl : 1;
+    };
+
+    class CallExprBitfields {
+        friend class CallExpr;
+        unsigned : NumExprBits;
+
+        unsigned IsStructFunc : 1;
+        unsigned numArgs : 4;
+    };
+
+
+    class IntegerLiteralBitfields {
+        friend class IntegerLiteral;
+        unsigned : NumExprBits;
+
+        unsigned Radix: 2;
+    };
+
+    class BooleanLiteralBitfields {
+        friend class BooleanLiteral;
+        unsigned : NumExprBits;
+
+        unsigned Value : 1;
+    };
+
+    class TypeExprBitfields {
+        friend class TypeExpr;
+        unsigned : NumExprBits;
+
+        unsigned IsLocal : 1;
+    };
+
+    class BinaryOperatorBitfields {
+        friend class BinaryOperator;
+        unsigned : NumExprBits;
+
+        unsigned opcode : 6;
+    };
+
+    class UnaryOperatorBitfields {
+        friend class UnaryOperator;
+        unsigned : NumExprBits;
+
+        unsigned opcode : 5;
+    };
+
+    class BuiltinExprBitfields {
+        friend class BuiltinExpr;
+        unsigned : NumExprBits;
+
+        unsigned builtinKind: 2;
+    };
+
+    class MemberExprBitfields {
+        friend class MemberExpr;
+        unsigned : NumExprBits;
+
+        unsigned IsModPrefix: 1;
+        unsigned IsStructFunction : 1;
+        unsigned IsStaticStructFunction : 1;
+    };
+
+    class InitListExprBitfields {
+        friend class InitListExpr;
+        unsigned : NumExprBits;
+
+        unsigned HasDesignators : 1;
+    };
+
+    class DesignatedInitExprBitfields {
+        friend class DesignatedInitExpr;
+        unsigned : NumExprBits;
+
         unsigned DesignatorKind : 1;
     };
+
+    class BitOffsetExprBitfields {
+        friend class BitOffsetExpr;
+        unsigned : NumExprBits;
+
+        unsigned width : 8;
+    };
+
     union {
-        StmtBitfields StmtBits;
-        unsigned BitsInit;      // to initialize all bits
+        StmtBitfields stmtBits;
+        SwitchStmtBitfields switchStmtBits;
+        CaseStmtBitfields caseStmtBits;
+        DefaultStmtBitfields defaultStmtBits;
+        CompoundStmtBitfields compoundStmtBits;
+
+        ExprBitfields exprBits;
+        IdentifierExprBitfields identifierExprBits;
+        CallExprBitfields callExprBits;
+        IntegerLiteralBitfields integerLiteralBits;
+        BooleanLiteralBitfields booleanLiteralBits;
+        TypeExprBitfields typeExprBits;
+        BinaryOperatorBitfields binaryOperatorBits;
+        UnaryOperatorBitfields unaryOperatorBits;
+        BuiltinExprBitfields builtinExprBits;
+        MemberExprBitfields memberExprBits;
+        InitListExprBitfields initListExprBits;
+        DesignatedInitExprBitfields designatedInitExprBits;
+        BitOffsetExprBitfields bitOffsetExprBits;
     };
 private:
     Stmt(const Stmt&);
@@ -87,40 +241,40 @@ private:
 };
 
 
-typedef OwningVector<Stmt> StmtList;
+typedef std::vector<Stmt*> StmtList;
 
 class ReturnStmt : public Stmt {
 public:
-    ReturnStmt(SourceLocation loc,Expr* value_);
-    virtual ~ReturnStmt();
+    ReturnStmt(SourceLocation loc, Expr* value_);
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_RETURN;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return RetLoc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return RetLoc; }
 
     Expr* getExpr() const { return value; }
 private:
-    Expr* value;
     SourceLocation RetLoc;
+    Expr* value;
 };
 
 
 class IfStmt : public Stmt {
 public:
     IfStmt(SourceLocation ifLoc,
-           Expr* condition, Stmt* thenStmt,
+           Stmt* condition, Stmt* thenStmt,
            SourceLocation elseLoc, Stmt* elseStmt);
-    virtual ~IfStmt();
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_IF;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return IfLoc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return IfLoc; }
 
-    Expr* getCond() const { return reinterpret_cast<Expr*>(SubExprs[COND]); }
+    VarDecl* getConditionVariable() const;
+
+    Stmt* getCond() const { return SubExprs[COND]; }
     Stmt* getThen() const { return SubExprs[THEN]; }
     Stmt* getElse() const { return SubExprs[ELSE]; }
 private:
@@ -134,14 +288,13 @@ private:
 
 class WhileStmt : public Stmt {
 public:
-    WhileStmt(SourceLocation Loc_, Expr* Cond_, Stmt* Then_);
-    virtual ~WhileStmt();
+    WhileStmt(SourceLocation Loc_, Stmt* Cond_, Stmt* Then_);
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_WHILE;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Loc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Loc; }
 
     Stmt* getCond() const { return Cond; }
     Stmt* getBody() const { return Then; }
@@ -155,13 +308,12 @@ private:
 class DoStmt : public Stmt {
 public:
     DoStmt(SourceLocation Loc_, Expr* Cond_, Stmt* Then_);
-    virtual ~DoStmt();
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_DO;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Loc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Loc; }
 
     Stmt* getCond() const { return Cond; }
     Stmt* getBody() const { return Then; }
@@ -175,13 +327,12 @@ private:
 class ForStmt : public Stmt {
 public:
     ForStmt(SourceLocation Loc_, Stmt* Init_, Expr* Cond_, Expr* Incr_, Stmt* Body_);
-    virtual ~ForStmt();
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_FOR;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Loc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Loc; }
 
     Stmt* getInit() const { return Init; }
     Expr* getCond() const { return Cond; }
@@ -198,72 +349,71 @@ private:
 
 class SwitchStmt : public Stmt {
 public:
-    SwitchStmt(SourceLocation Loc_, Expr* Cond_, StmtList& Cases_);
-    virtual ~SwitchStmt();
+    SwitchStmt(SourceLocation Loc_, Stmt* Cond_, Stmt** cases_, unsigned numCases_);
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_SWITCH;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Loc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Loc; }
 
-    Expr* getCond() const { return Cond; }
-    const StmtList& getCases() const { return Cases; }
+    Stmt* getCond() const { return Cond; }
+    unsigned numCases() const { return switchStmtBits.numCases; }
+    Stmt** getCases() const { return cases; }
 private:
     SourceLocation Loc;
-    Expr* Cond;
-    StmtList Cases;
+    Stmt* Cond;
+    Stmt** cases;
 };
 
 
 class CaseStmt : public Stmt {
 public:
-    CaseStmt(SourceLocation Loc_, Expr* Cond_, StmtList& Stmts_);
-    virtual ~CaseStmt();
+    CaseStmt(SourceLocation Loc_, Expr* Cond_, Stmt** stmts_, unsigned numStmts_);
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_CASE;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Loc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Loc; }
 
     Expr* getCond() const { return Cond; }
-    const StmtList& getStmts() const { return Stmts; }
+    unsigned numStmts() const { return caseStmtBits.numStmts; }
+    Stmt** getStmts() const { return stmts; }
 private:
     SourceLocation Loc;
     Expr* Cond;
-    StmtList Stmts;
+    Stmt** stmts;
 };
 
 
 class DefaultStmt : public Stmt {
 public:
-    DefaultStmt(SourceLocation Loc_, StmtList& Stmts_);
-    virtual ~DefaultStmt();
+    DefaultStmt(SourceLocation Loc_, Stmt** stmts_, unsigned numStmts_);
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_DEFAULT;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Loc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Loc; }
 
-    const StmtList& getStmts() const { return Stmts; }
+    unsigned numStmts() const { return defaultStmtBits.numStmts; }
+    Stmt** getStmts() const { return stmts; }
 private:
     SourceLocation Loc;
-    StmtList Stmts;
+    Stmt** stmts;
 };
 
 
 class BreakStmt : public Stmt {
 public:
     BreakStmt(SourceLocation Loc_);
-    virtual ~BreakStmt();
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_BREAK;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Loc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Loc; }
 private:
     SourceLocation Loc;
 };
@@ -272,13 +422,12 @@ private:
 class ContinueStmt : public Stmt {
 public:
     ContinueStmt(SourceLocation Loc_);
-    virtual ~ContinueStmt();
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_CONTINUE;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Loc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Loc; }
 private:
     SourceLocation Loc;
 };
@@ -287,18 +436,17 @@ private:
 class LabelStmt : public Stmt {
 public:
     LabelStmt(const char* name_, SourceLocation Loc_, Stmt* subStmt_);
-    virtual ~LabelStmt();
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_LABEL;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Loc; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Loc; }
     Stmt* getSubStmt() const { return subStmt; }
-    const std::string& getName() const { return name; }
+    const char* getName() const { return name; }
 private:
-    std::string name;
     SourceLocation Loc;
+    const char* name;
     Stmt* subStmt;
 };
 
@@ -306,16 +454,15 @@ private:
 class GotoStmt : public Stmt {
 public:
     GotoStmt(const char* name_, SourceLocation GotoLoc_, SourceLocation LabelLoc_);
-    virtual ~GotoStmt();
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_GOTO;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return GotoLoc; }
-    const std::string& getName() const { return name; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return GotoLoc; }
+    const char* getName() const { return name; }
 private:
-    std::string name;
+    const char* name;
     SourceLocation GotoLoc;
     SourceLocation LabelLoc;
 };
@@ -323,22 +470,39 @@ private:
 
 class CompoundStmt : public Stmt {
 public:
-    CompoundStmt(SourceLocation l, SourceLocation r, StmtList& stmts_);
-    virtual ~CompoundStmt();
+    CompoundStmt(SourceLocation l, SourceLocation r, Stmt** stmts_, unsigned numStmts_);
     static bool classof(const Stmt* S) {
         return S->getKind() == STMT_COMPOUND;
     }
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
-    virtual SourceLocation getLocation() const { return Left; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const { return Left; }
 
-    const StmtList& getStmts() const { return Stmts; }
+    unsigned numStmts() const { return compoundStmtBits.numStmts; }
+    Stmt** getStmts() const { return stmts; }
+
     Stmt* getLastStmt() const;
     SourceLocation getRight() const { return Right; }
 private:
     SourceLocation Left;
     SourceLocation Right;
-    StmtList Stmts;
+    Stmt** stmts;
+};
+
+
+class DeclStmt : public Stmt {
+public:
+    DeclStmt(VarDecl* decl_);
+    static bool classof(const Stmt* S) {
+        return S->getKind() == STMT_DECL;
+    }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    SourceLocation getLocation() const;
+
+    const char* getName() const;
+    VarDecl* getDecl() const { return decl; }
+private:
+    VarDecl* decl;
 };
 
 

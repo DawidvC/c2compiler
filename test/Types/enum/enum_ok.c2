@@ -1,0 +1,8 @@
+// @warnings{no-unused}
+module test;
+
+type A enum int32 {
+    B = 0,
+    C,
+}
+

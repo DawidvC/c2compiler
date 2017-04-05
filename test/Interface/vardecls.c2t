@@ -1,0 +1,25 @@
+// @recipe lib static
+$warnings no-unused
+$generate-c no-build
+$export hello
+
+// @file{file1}
+module hello;
+
+public int8 x;
+public const int32 Y = 20;
+public int64 z = 10;
+
+public type Number int32;
+public Number nn;
+
+// @expect{atleast, hello.c2i}
+
+type Number int32;
+
+int8 x;
+const int32 Y = 20;
+int64 z;
+
+Number nn;
+

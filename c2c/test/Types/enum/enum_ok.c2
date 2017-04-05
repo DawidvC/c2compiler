@@ -1,8 +1,0 @@
-// @warnings{no-unused}
-module test;
-
-type A enum int {
-    B = 0,
-    C,
-}
-

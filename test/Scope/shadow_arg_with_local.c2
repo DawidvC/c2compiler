@@ -1,0 +1,7 @@
+// @warnings{no-unused}
+module test;
+
+func void test1(int32 a) {    // @note{previous definition is here}
+    int32 a;      // @error{redefinition of a}
+}
+

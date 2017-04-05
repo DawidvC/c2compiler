@@ -1,6 +1,0 @@
-module use1;
-
-public type Number int;
-
-type Coor uint8;
-

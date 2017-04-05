@@ -1,0 +1,6 @@
+module test;
+
+int32 a;  // @warning{unused variable 'test.a'}
+
+public int32 b;  // @warning{unused variable 'test.b'}
+

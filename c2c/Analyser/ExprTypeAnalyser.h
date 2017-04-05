@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,6 @@
 
 #include <clang/Basic/SourceLocation.h>
 
-#include "AST/Type.h"
-
 namespace clang {
 class DiagnosticsEngine;
 }
@@ -27,9 +25,9 @@ class DiagnosticsEngine;
 namespace C2 {
 
 class Expr;
+class ExplicitCastExpr;
 class BinaryOperator;
-class UnaryOperator;
-class ConditionalOperator;
+class QualType;
 
 /*
  *  ExprTypeAnalyser checks each sub-expression that is CTC_FULL or
@@ -43,14 +41,20 @@ public:
     ExprTypeAnalyser(clang::DiagnosticsEngine& Diags_);
 
     void check(QualType Tleft, const Expr* expr);
+    bool checkExplicitCast(const ExplicitCastExpr* cast, QualType TLeft, QualType TRight);
 private:
-    void error(SourceLocation loc, QualType left, QualType right) const;
+    void error(clang::SourceLocation loc, QualType left, QualType right) const;
     void checkBinOp(QualType TLeft, const BinaryOperator* binop);
 
     bool checkCompatible(QualType left, const Expr* expr) const;
     bool checkBuiltin(QualType left, QualType right, const Expr* expr, bool first) const;
     bool checkPointer(QualType left, QualType right, const Expr* expr) const;
     bool checkFunction(QualType left, const Expr* expr) const;
+
+    bool checkNonPointerCast(const ExplicitCastExpr* expr, QualType DestType, QualType SrcType);
+    bool checkBuiltinCast(const ExplicitCastExpr* expr, QualType DestType, QualType SrcType);
+    bool checkEnumCast(const ExplicitCastExpr* expr, QualType DestType, QualType SrcType);
+    bool checkFunctionCast(const ExplicitCastExpr* expr, QualType DestType, QualType SrcType);
 
     clang::DiagnosticsEngine& Diags;
 

@@ -1,0 +1,15 @@
+// @recipe bin
+    $warnings no-unused-variable
+
+// @file{file1}
+module foo;
+
+public type State enum uint16 { STATE_A }
+
+// @file{file2}
+module bar;
+
+import foo local;
+
+int32 b = STATE_A;
+

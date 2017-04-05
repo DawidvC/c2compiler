@@ -1,8 +1,0 @@
-// @warnings{no-unused}
-module test;
-
-func void test1() {
-    int[100] array = { 0 }
-    int v = array[1];
-}
-

@@ -1,0 +1,9 @@
+module test;
+
+local int32 a;    // @error{cannot use keyword local for global variables}
+
+public func int32 main() {
+    return 0;
+}
+
+

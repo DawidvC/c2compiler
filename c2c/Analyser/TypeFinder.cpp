@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
  * limitations under the License.
  */
 
+#include <assert.h>
 #include "Analyser/TypeFinder.h"
 #include "AST/Expr.h"
 
@@ -39,7 +40,6 @@ QualType TypeFinder::findType(const Expr* expr) {
         break;
     case EXPR_INITLIST:
     case EXPR_DESIGNATOR_INIT:
-    case EXPR_DECL:
         assert(0 && "should not come here");
         break;
     case EXPR_BINOP:
@@ -56,6 +56,11 @@ QualType TypeFinder::findType(const Expr* expr) {
         break;
     case EXPR_PAREN:
         return findType(cast<ParenExpr>(expr)->getExpr());
+    case EXPR_BITOFFSET:
+        break;
+    case EXPR_CAST:
+        assert(0 && "TODO");
+        break;
     }
     return expr->getType();
 }

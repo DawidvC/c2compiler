@@ -1,0 +1,14 @@
+// @warnings{no-unused}
+module test;
+
+type Number int32;
+
+func void test1() {
+    10 = 20;        // @error{expression is not assignable}
+    "foo" = "bar";  // @error{expression is not assignable}
+    true = false;   // @error{expression is not assignable}
+    'c' = 'd';      // @error{expression is not assignable}
+    3.14 = 2.14;    // @error{expression is not assignable}
+}
+
+

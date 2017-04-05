@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,6 +19,9 @@
 #include <vector>
 
 #include "AST/Type.h"
+#include <clang/Basic/SourceLocation.h>
+
+using clang::SourceLocation;
 
 namespace clang {
 class DiagnosticsEngine;
@@ -28,10 +31,11 @@ namespace C2 {
 
 class Decl;
 class Scope;
+class ASTContext;
 
 class TypeResolver {
 public:
-    TypeResolver(Scope& g, clang::DiagnosticsEngine& Diags_, TypeContext& tc_);
+    TypeResolver(Scope& g, clang::DiagnosticsEngine& Diags_, ASTContext& ctx_);
 
     // resolving of TypeDecls (during Type Analysis phase)
     unsigned checkType(QualType Q, bool used_public);
@@ -40,6 +44,10 @@ public:
 
     // resolving of other Types (after Type Analysis phase)
     QualType resolveType(QualType Q, bool usedPublic);
+
+    void checkOpaqueType(SourceLocation loc, bool isPublic, QualType Q);
+
+    bool requireCompleteType(SourceLocation loc, QualType Q, int msg);
 private:
     QualType resolveCanonical(QualType Q) const;
     unsigned checkUnresolvedType(const UnresolvedType* type, bool used_public);
@@ -51,7 +59,7 @@ private:
 
     Scope& globals;
     clang::DiagnosticsEngine& Diags;
-    TypeContext& typeContext;
+    ASTContext& Context;
 };
 
 }

@@ -1,0 +1,7 @@
+// @warnings{no-unused}
+module test;
+
+func void function() {
+    int32 a = function;       // @error{invalid type conversion from 'void ()' to 'int32'}
+}
+

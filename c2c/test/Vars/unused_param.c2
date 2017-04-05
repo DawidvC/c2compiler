@@ -1,7 +1,0 @@
-// @warnings{no-unused-function}
-module test;
-
-func void test1(int a,   // @warning{unused parameter a}
-               int b)   // @warning{unused parameter b}
-{}
-

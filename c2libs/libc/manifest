@@ -1,0 +1,33 @@
+# C2 wrapper for the standard C library
+
+[library]
+language = "C"
+type = [ "static", "dynamic" ]
+
+[[modules]]
+name = "stdio"
+
+[[modules]]
+name = "c_errno"
+
+[[modules]]
+name = "stdlib"
+
+[[modules]]
+name = "string"
+
+[[modules]]
+name = "strings"
+
+[[modules]]
+name = "unistd"
+
+[[modules]]
+name = "regex"
+
+[[modules]]
+name = "ctype"
+
+[[modules]]
+name = "sys_time"
+

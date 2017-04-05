@@ -1,9 +1,0 @@
-module test;
-
-local int a;    // @error{cannot use keyword local for global variables}
-
-public func int main() {
-    return 0;
-}
-
-

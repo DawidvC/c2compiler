@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,6 +25,10 @@ void Recipe::addConfig(const std::string& config_) {
     configs.push_back(config_);
 }
 
+void Recipe::addExported(const std::string& mod_) {
+    exported.push_back(mod_);
+}
+
 void Recipe::addAnsiCConfig(const std::string& config_) {
     cConfigs.push_back(config_);
 }
@@ -37,11 +41,29 @@ void Recipe::addDepsConfig(const std::string& config_) {
     depConfigs.push_back(config_);
 }
 
+void Recipe::addLibrary(const std::string& lib_, Component::Type type_) {
+    libraries.push_back(Dependency(lib_, type_));
+}
+
+bool Recipe::hasLibrary(const std::string& lib_) const {
+    for (unsigned i=0; i<libraries.size(); i++) {
+        if (libraries[i].name == lib_) return true;
+    }
+    return false;
+}
+
 void Recipe::silenceWarning(const std::string& warn_) {
     silentWarnings.push_back(warn_);
 }
 
 const std::string& Recipe::get(int i) const {
     return files[i];
+}
+
+bool Recipe::hasExported(const std::string& mod) const {
+    for (unsigned i=0; i<exported.size(); ++i) {
+        if (exported[i] == mod) return true;
+    }
+    return false;
 }
 

@@ -1,0 +1,10 @@
+// @warnings{no-unused-function}
+module test;
+
+int32 a;
+
+func int32 test1() {
+    int32 b = a;
+    return b;
+}
+

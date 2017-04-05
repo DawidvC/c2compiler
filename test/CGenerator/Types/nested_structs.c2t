@@ -1,0 +1,41 @@
+// @recipe bin
+    $warnings no-unused
+    $generate-c
+
+// @file{file1}
+module test;
+
+type Outer struct {
+    int32 x;
+    struct a {
+        int32 x;
+        int32 y;
+    }
+    struct {
+        int32 z;
+    }
+    union {
+        int32 c;
+        int16 d;
+        int8  e;
+    }
+}
+
+// @expect{atleast, build/test.c}
+typedef struct test_Outer_ test_Outer;
+struct test_Outer_ {
+    int32_t x;
+    struct {
+        int32_t x;
+        int32_t y;
+    } a;
+    struct {
+        int32_t z;
+    };
+    union {
+        int32_t c;
+        int16_t d;
+        char e;
+    };
+};
+

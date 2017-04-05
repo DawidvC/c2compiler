@@ -1,7 +1,0 @@
-// @warnings{no-unused}
-module test;
-
-type A enum int {
-    A,  // @error{redefinition of A}
-}
-

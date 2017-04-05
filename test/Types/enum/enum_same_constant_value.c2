@@ -1,0 +1,11 @@
+// @warnings{no-unused}
+module test;
+
+type A enum int32 {
+    B = 10,  // @note{element B also has value 10}
+    C = 10,  // @error{duplicate enum value}
+    D,       // @note{element D also has value 11}
+    E = 11,  // @error{duplicate enum value}
+}
+
+

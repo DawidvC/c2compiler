@@ -1,0 +1,12 @@
+// @warnings{no-unused}
+module test;
+
+int32[+] a;
+
+a += 10;
+
+public func int32 main() {
+    a += 20;    // @error{cannot add values to incremental array in function scope}
+    return 0;
+}
+

@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,12 @@
 #define UTILS_STRINGBUILDER_H
 
 #include <string>
+#include <sys/types.h>
+#include <inttypes.h>
 
 namespace C2 {
+
+#define PRINTF_FORMAT_CHECK(format_index, args_index) __attribute__ ((__format__(printf, format_index, args_index)))
 
 class StringBuilder {
 public:
@@ -29,18 +33,22 @@ public:
     StringBuilder& operator<<(void* input);
     StringBuilder& operator<<(const std::string& input);
     StringBuilder& operator<<(char input);
-    StringBuilder& operator<<(int input);
-    StringBuilder& operator<<(unsigned input);
-    StringBuilder& operator<<(long input);
-    StringBuilder& operator<<(long long input);
-    StringBuilder& operator<<(unsigned long long input);
+    StringBuilder& operator<<(int32_t input);
+    StringBuilder& operator<<(uint32_t input);
+    StringBuilder& operator<<(int64_t input);
+    StringBuilder& operator<<(uint64_t input);
     StringBuilder& operator<<(const StringBuilder& input);
 
-    operator const char*() const;
+    void print(const char* format, ...) PRINTF_FORMAT_CHECK(2, 3);
+    void number(unsigned radix_, int64_t value);
+
+    operator const char*() const { return buffer; }
+    const char* c_str() const { return buffer; }
     void clear();
-    unsigned size() const;
-    unsigned space_left() const;
-    bool isEmpty() const;
+    unsigned size() const { return (unsigned)(ptr - buffer); }
+    unsigned space_left() const { return capacity - size(); }
+    bool isEmpty() const { return (size() == 0); }
+
     void strip(char c);
     void indent(unsigned num);
     void setColor(const char* color);

@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,17 +19,23 @@
 #include <vector>
 #include <string>
 
+#include "Builder/LibraryLoader.h"
 #include "AST/Module.h"
-#include "FileUtils/FileDb.h"
+#include "AST/ASTContext.h"
+#include "AST/Component.h"
+#include "Utils/TargetInfo.h"
 
 namespace clang {
 class DiagnosticsEngine;
+class SourceManager;
+class LangOptions;
 }
 
 namespace C2 {
 
+class AST;
 class Recipe;
-class FileInfo;
+class ParseHelper;
 
 struct BuildOptions {
     BuildOptions()
@@ -37,31 +43,44 @@ struct BuildOptions {
         , printAST1(false)
         , printAST2(false)
         , printAST3(false)
+        , printASTLib(false)
         , printTiming(false)
         , printSymbols(false)
+        , printLibSymbols(false)
         , generateIR(false)
         , printIR(false)
         , generateC(false)
         , printC(false)
+        , checkOnly(false)
+        , showLibs(false)
         , printModules(false)
         , printDependencies(false)
+        , generateRefs(false)
         , verbose(false)
         , testMode(false)
+        , libdir(0)
     {}
     bool printAST0;
     bool printAST1;
     bool printAST2;
     bool printAST3;
+    bool printASTLib;
     bool printTiming;
     bool printSymbols;
+    bool printLibSymbols;
     bool generateIR;
     bool printIR;
     bool generateC;
     bool printC;
+    bool checkOnly;
+    bool showLibs;
     bool printModules;
     bool printDependencies;
+    bool generateRefs;
     bool verbose;
     bool testMode;
+
+    const char* libdir;
 };
 
 
@@ -72,29 +91,44 @@ public:
 
     int checkFiles();
     int build();
+    void generateDeps(bool showFiles, bool showPrivate, bool showExternals, const std::string& path) const;
+
+    // For external tools
+    const Components& getComponents() const { return components; }
 private:
-    bool haveModule(const std::string& name) const;
-    Module* getModule(const std::string& name, bool isExternal, bool isCLib);
-    bool createModules();
-    bool loadExternalModules();
-    bool loadModule(const std::string& name);
+    Module* findModule(const std::string& name) const;
+    bool checkImports(ParseHelper& helper);
     unsigned analyse();
-    void dumpModules() const;
-    void printASTs() const;
+    void printSymbols(bool printLibs) const;
+    void printComponents() const;
+    void log(const char* color, const char* format, ...) const;
 
     bool checkMainFunction(clang::DiagnosticsEngine& Diags);
+    bool checkExportedPackages() const;
+    typedef std::deque<std::string> ImportsQueue;
+    bool checkModuleImports(ParseHelper& helper, Component* component, Module* module, ImportsQueue& queue, const LibInfo* lib = 0);
+    void createC2Module();
+
+    void rewriterTest(clang::SourceManager& SM, clang::LangOptions& LangOpts);
+    void generateOptionalDeps();
+    void generateOptionalTags(const clang::SourceManager& SM) const;
+    void generateInterface() const;
     void generateOptionalC();
     void generateOptionalIR();
-    void generateOptionsDeps() const;
 
     const Recipe& recipe;
     BuildOptions options;
+    TargetInfo targetInfo;
 
-    typedef std::vector<FileInfo*> Files;
-    Files files;
-    FileDb filenames;
-
+    ASTContext context;
     Modules modules;
+    Module* c2Mod;
+
+    Components components;
+    Component* mainComponent;
+    LibraryLoader libLoader;
+
+    bool useColors;
 
     C2Builder(const C2Builder&);
     C2Builder& operator= (const C2Builder&);

@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,15 @@
 #ifndef PARSER_C2SEMA_H
 #define PARSER_C2SEMA_H
 
-#include <string>
+#include <clang/Basic/SourceLocation.h>
+#include <vector>
 #include <map>
 
-#include <clang/Basic/SourceLocation.h>
-
-#include "Parser/ParserTypes.h"
-#include "AST/Expr.h"
 #include "AST/Decl.h"
+#include "AST/Stmt.h"
+#include "AST/Expr.h"
 #include "AST/Type.h"
+#include "Parser/ParserTypes.h"
 
 namespace clang {
 class SourceManager;
@@ -44,42 +44,50 @@ using namespace clang;
 namespace C2 {
 
 class AST;
-class Stmt;
+class ASTContext;
+class Component;
+class Module;
+
+typedef std::vector<Decl*> DeclList;
+typedef std::vector<VarDecl*> VarDeclList;
 
 class C2Sema {
 public:
-    C2Sema(SourceManager& sm_, DiagnosticsEngine& Diags_, TypeContext& tc, AST& ast_, clang::Preprocessor& PP_);
+    C2Sema(SourceManager& sm_, DiagnosticsEngine& Diags_, clang::Preprocessor& PP_,
+           Component& comp_, Module* existingMod, const std::string& filename_);
     ~C2Sema();
+
+    void printAST() const;
 
     // file level actions
     void ActOnModule(const char* name, SourceLocation loc);
     void ActOnImport(const char* name, SourceLocation loc, Token& aliasTok, bool isLocal);
-    void ActOnVarDef(const char* name, SourceLocation loc, bool is_public, Expr* type, Expr* InitValue);
+    VarDecl* ActOnVarDef(const char* name, SourceLocation loc, bool is_public, Expr* type);
 
     // function decls
     FunctionDecl* ActOnFuncDecl(const char* name, SourceLocation loc, bool is_public, Expr* rtype);
-    FunctionDecl* ActOnFuncTypeDecl(const char* name, SourceLocation loc, bool is_public, Expr* rtype);
-    void ActOnFunctionArg(FunctionDecl* func, const char* name, SourceLocation loc, Expr* type, Expr* InitValue);
-    void ActOnFinishFunctionBody(Decl* func, Stmt* body);
+    FunctionTypeDecl* ActOnFuncTypeDecl(const char* name, SourceLocation loc, bool is_public, Expr* rtype);
+    VarDeclResult ActOnFunctionArg(FunctionDecl* func, const char* name, SourceLocation loc, Expr* type, Expr* InitValue);
+    void ActOnFinishFunctionArgs(FunctionDecl* func, VarDeclList& args);
+    void ActOnFinishFunctionBody(FunctionDecl* func, Stmt* body);
 
     void ActOnArrayValue(const char* name, SourceLocation loc, Expr* Value);
 
     // struct decls
-    void ActOnAliasType(const char* name, SourceLocation loc, Expr* typeExpr, bool is_public);
+    Decl* ActOnAliasType(const char* name, SourceLocation loc, Expr* typeExpr, bool is_public);
     StructTypeDecl* ActOnStructType(const char* name, SourceLocation loc, bool isStruct, bool is_public, bool is_global);
-    void ActOnStructVar(StructTypeDecl* S, const char* name, SourceLocation loc, Expr* type, Expr* InitValue, bool is_public);
-    void ActOnStructMember(StructTypeDecl* S, Decl* member);
-    void ActOnStructTypeFinish(StructTypeDecl* S, SourceLocation left, SourceLocation right);
+    Decl* ActOnStructVar(StructTypeDecl* S, const char* name, SourceLocation loc, Expr* type, Expr* InitValue);
+    void ActOnStructMembers(StructTypeDecl* S, DeclList& members);
 
     // statements
     StmtResult ActOnReturnStmt(SourceLocation loc, Expr* value);
     StmtResult ActOnIfStmt(SourceLocation ifLoc,
-                           ExprResult condition, StmtResult thenStmt,
+                           Stmt* condition, StmtResult thenStmt,
                            SourceLocation elseLoc, StmtResult elseStmt);
-    StmtResult ActOnWhileStmt(SourceLocation loc, ExprResult condition, StmtResult thenStmt);
+    StmtResult ActOnWhileStmt(SourceLocation loc, Stmt* condition, StmtResult thenStmt);
     StmtResult ActOnDoStmt(SourceLocation loc, ExprResult condition, StmtResult thenStmt);
     StmtResult ActOnForStmt(SourceLocation loc, Stmt* Init, Expr* Cond, Expr* Incr, Stmt* Body);
-    StmtResult ActOnSwitchStmt(SourceLocation loc, Expr* condition, StmtList& cases);
+    StmtResult ActOnSwitchStmt(SourceLocation loc, Stmt* condition, StmtList& cases);
     StmtResult ActOnCaseStmt(SourceLocation loc, Expr* condition, StmtList& stmts);
     StmtResult ActOnDefaultStmt(SourceLocation loc, StmtList& stmts);
     StmtResult ActOnBreakStmt(SourceLocation loc);
@@ -92,7 +100,7 @@ public:
     // expressions
     ExprResult ActOnBooleanConstant(const Token& Tok);
     ExprResult ActOnNumericConstant(const Token& Tok);
-    ExprResult ActOnStringLiteral(const clang::Token* StringToks, unsigned NumStringToks);
+    ExprResult ActOnStringLiteral(ArrayRef<Token> StringToks);
     ExprResult ActOnCharacterConstant(const Token& Tok);
     ExprResult ActOnCallExpr(Expr* id, Expr** args, unsigned num, SourceLocation RParenLoc);
     ExprResult ActOnIdExpression(IdentifierInfo& symII, SourceLocation symLoc);
@@ -106,25 +114,26 @@ public:
     ExprResult ActOnInitList(SourceLocation left_, SourceLocation right_, ExprList& vals);
     ExprResult ActOnArrayDesignatorExpr(SourceLocation left, ExprResult Designator, ExprResult InitValue);
     ExprResult ActOnFieldDesignatorExpr(SourceLocation loc, IdentifierInfo* field, ExprResult InitValue);
-    ExprResult ActOnArrayType(Expr* base, Expr* size);
-    ExprResult ActOnPointerType(Expr* base);
-    ExprResult ActOnUserType(IdentifierInfo* psym, SourceLocation ploc,
-                             IdentifierInfo* tsym, SourceLocation tloc);
+    ExprResult ActOnArrayType(Expr* base, Expr* size, bool isIncremental);
+    ExprResult ActOnPointerType(Expr* base, unsigned qualifier);
+    ExprResult ActOnUserType(Expr* mName, Expr* tName);
     ExprResult ActOnBuiltinType(tok::TokenKind k);
-    EnumTypeDecl* ActOnEnumType(const char* name, SourceLocation loc, Expr* implType, bool is_public);
-    ExprResult ActOnEnumTypeFinished(Expr* enumType, SourceLocation leftBrace, SourceLocation rightBrace);
-    void ActOnEnumConstant(EnumTypeDecl* Enum, IdentifierInfo* symII, SourceLocation symLoc, Expr* Value);
+    EnumTypeDecl* ActOnEnumType(const char* name, SourceLocation loc, Expr* implType, bool is_public, bool is_incr);
+    void ActOnEnumTypeFinished(EnumTypeDecl* Enum, EnumConstantDecl** constants, unsigned numConstants);
+    EnumConstantDecl* ActOnEnumConstant(EnumTypeDecl* Enum, IdentifierInfo* symII, SourceLocation symLoc, Expr* Value);
     ExprResult ActOnTypeQualifier(ExprResult R, unsigned qualifier);
-    ExprResult ActOnBuiltinExpression(SourceLocation Loc, Expr* expr, bool isSizeof);
+    ExprResult ActOnBuiltinExpression(SourceLocation Loc, Expr* expr, BuiltinExpr::BuiltinKind kind_);
     ExprResult ActOnArraySubScriptExpr(SourceLocation RLoc, Expr* Base, Expr* Idx);
-    ExprResult ActOnMemberExpr(Expr* Base, bool isArrow, IdentifierInfo* sym, SourceLocation loc);
+    ExprResult ActOnMemberExpr(Expr* Base, Expr* member);
     ExprResult ActOnPostfixUnaryOp(SourceLocation OpLoc, tok::TokenKind Kind, Expr* Input);
     ExprResult ActOnUnaryOp(SourceLocation OpLoc, tok::TokenKind Kind, Expr* Input);
+    ExprResult ActOnBitOffset(SourceLocation colLoc, Expr* LHS, Expr* RHS);
+    ExprResult ActOnExplicitCast(SourceLocation castLoc, Expr* type, Expr* expr);
 
+    // Attributes
+    void ActOnAttr(Decl* D, const char* name, SourceRange range, Expr* arg);
 private:
     ExprResult ActOnIntegerConstant(SourceLocation Loc, uint64_t Val);
-    typedef std::map<const std::string, const Decl*> Names;
-    void analyseStructNames(const StructTypeDecl* S, Names& names);
     FunctionDecl* createFuncDecl(const char* name, SourceLocation loc, bool is_public, Expr* rtype);
     VarDecl* createVarDecl(VarDeclKind k, const char* name, SourceLocation loc, TypeExpr* typeExpr,
                                     Expr* InitValue, bool is_public);
@@ -133,14 +142,21 @@ private:
 
     DiagnosticBuilder Diag(SourceLocation Loc, unsigned DiagID);
     void addSymbol(Decl* d);
-    const ImportDecl* findModule(const std::string& name) const;
+    Decl* findSymbol(const char* name) const;
+    const ImportDecl* findModule(const char* name_) const;
 
     SourceManager& SourceMgr;
     DiagnosticsEngine& Diags;
-
-    TypeContext& typeContext;
-    AST& ast;
     clang::Preprocessor& PP;
+
+    Component& component;
+    Module* module;
+    AST& ast;
+    ASTContext& Context;
+
+    typedef std::map<std::string, Decl*> Symbols;
+    typedef Symbols::const_iterator SymbolsConstIter;
+    Symbols imports;
 
     C2Sema(const C2Sema&);
     C2Sema& operator= (const C2Sema&);

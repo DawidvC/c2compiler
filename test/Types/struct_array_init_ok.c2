@@ -1,0 +1,14 @@
+// @warnings{no-unused}
+module test;
+
+type S struct {
+    int8* cp;
+    int32 a;
+}
+
+S[] s = {
+    { "a", 1 },
+    { "b", 2 },
+    { "c", 3 }
+}
+

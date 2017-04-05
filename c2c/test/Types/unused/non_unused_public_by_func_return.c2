@@ -1,8 +1,0 @@
-module test;
-
-public type Number int;
-
-public func Number main() {
-    return 0;
-}
-

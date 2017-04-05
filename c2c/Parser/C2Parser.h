@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,7 +18,8 @@
 
 #include <assert.h>
 #include <clang/Lex/Preprocessor.h>
-#include <clang/Sema/Ownership.h>
+#include "Parser/Ownership.h"
+#include "Parser/ParserTypes.h"
 
 //#define PARSER_DEBUG
 
@@ -26,8 +27,6 @@
 #include <iostream>
 #include "Utils/color.h"
 #endif
-
-#include "Parser/ParserTypes.h"
 
 // EXCEPTION
 using namespace clang;
@@ -37,11 +36,8 @@ namespace C2 {
 class C2Sema;
 class Decl;
 class Expr;
-class Stmt;
-class CallExpr;
 class FunctionDecl;
 class StructTypeDecl;
-class EnumTypeDecl;
 
 /// PrecedenceLevels - These are precedences for the binary/ternary
 /// operators in the C99 grammar.  These have been named to relate
@@ -69,9 +65,10 @@ namespace prec {
 
 class C2Parser {
 public:
-    C2Parser(clang::Preprocessor& pp, C2Sema& sema);
+    friend class BalancedDelimiterTracker;
+
+    C2Parser(clang::Preprocessor& pp, C2Sema& sema, bool isInterface_);
     ~C2Parser();
-    void Initialize();
 
     bool Parse();
 private:
@@ -81,6 +78,7 @@ private:
     unsigned short ParenCount, BracketCount, BraceCount;
     C2Sema& Actions;
     DiagnosticsEngine& Diags;
+    bool isInterface;
 
     ExprResult ExprError();
     StmtResult StmtError();
@@ -98,11 +96,12 @@ private:
     void ParseStructType(bool is_struct, const char* id, SourceLocation idLoc, bool is_public);
     void ParseStructBlock(StructTypeDecl* S);
     void ParseEnumType(const char* id, SourceLocation idLoc, bool is_public);
+    void ParseAliasType(const char* id, SourceLocation idLoc, bool is_public);
     void ParseFuncType(IdentifierInfo* id, SourceLocation& idLoc, bool is_public);
 
     // function def
     bool ParseFunctionParams(FunctionDecl* func, bool allow_defaults);
-    bool ParseParamDecl(FunctionDecl* func, bool allow_defaults);
+    VarDeclResult ParseParamDecl(FunctionDecl* func, bool allow_defaults);
 
     // var def
     ExprResult ParseArrayDesignator(bool* need_semi);
@@ -118,6 +117,7 @@ private:
     ExprResult ParseArray(ExprResult base);
     ExprResult ParseSizeof();
     ExprResult ParseElemsof();
+    ExprResult ParseEnumMinMax(bool isMin);
     ExprResult ParseIdentifier();
     ExprResult ParseFullIdentifier();
 
@@ -139,11 +139,13 @@ private:
     StmtResult ParseBreakStatement();
     StmtResult ParseContinueStatement();
     StmtResult ParseDeclOrStatement();
-    StmtResult ParseDeclaration();
+    StmtResult ParseDeclaration(bool checkSemi);
     StmtResult ParseCaseStatement();
     StmtResult ParseDefaultStatement();
     StmtResult ParseLabeledStatement();
     StmtResult ParseExprStatement();
+    bool ParseCondition(StmtResult& Res);
+    bool ParseAttributes(Decl* D);
 
     // expressions
     /// TypeCastState - State whether an expression is or may be a type cast.
@@ -163,6 +165,7 @@ private:
     ExprResult ParseCastExpression(bool isUnaryExpression,
                              bool isAddressOfOperand = false,
                              TypeCastState isTypeCast = NotTypeCast);
+    ExprResult ParseExplicitCastExpression();
     ExprResult ParseRHSOfBinaryExpression(ExprResult LHS, prec::Level MinPrec);
     ExprResult ParseStringLiteralExpression(bool AllowUserDefinedLiteral = false);
     ExprResult ParsePostfixExpressionSuffix(ExprResult LHS);
@@ -216,8 +219,21 @@ private:
         return PrevTokLocation;
     }
 
-    void ConsumeOptionalSemi() {
-        if (Tok.is(tok::semi)) ConsumeToken();
+    bool TryConsumeToken(tok::TokenKind Expected) {
+        if (Tok.isNot(Expected))
+            return false;
+        assert(!isTokenSpecial() &&
+                "Should consume special tokens with Consume*Token");
+        PrevTokLocation = Tok.getLocation();
+        PP.Lex(Tok);
+        return true;
+    }
+
+    bool TryConsumeToken(tok::TokenKind Expected, SourceLocation &Loc) {
+        if (!TryConsumeToken(Expected))
+            return false;
+        Loc = PrevTokLocation;
+        return true;
     }
 
     // Low-level token peeking and consumption methods (from Parser.h)
@@ -290,6 +306,15 @@ private:
         return ConsumeToken();
     }
 
+  /// \brief Abruptly cut off parsing; mainly used when we have reached the
+  /// code-completion point.
+  void cutOffParsing() {
+    if (PP.isCodeCompletionEnabled())
+      PP.setCodeCompletionReached();
+    // Cut off parsing by acting as if we reached the end-of-file.
+    Tok.setKind(tok::eof);
+  }
+
   //===--------------------------------------------------------------------===//
   // Low-Level token peeking and consumption methods.
   //
@@ -317,18 +342,26 @@ private:
            Tok.getKind() == tok::utf32_string_literal;
   }
 
+  /// isTokenSpecial - True if this token requires special consumption methods.
+  bool isTokenSpecial() const {
+    return isTokenStringLiteral() || isTokenParen() || isTokenBracket() ||
+           isTokenBrace() || Tok.is(tok::code_completion);
+  }
 
     bool ExpectIdentifier(const char *Msg = "");
 
     /// ExpectAndConsume - The parser expects that 'ExpectedTok' is next in the
     /// input.  If so, it is consumed and false is returned.
     ///
-    /// If the input is malformed, this emits the specified diagnostic.  Next, if
-    /// SkipToTok is specified, it calls SkipUntil(SkipToTok).  Finally, true is
+    /// If a trivial punctuator misspelling is encountered, a FixIt error
+    /// diagnostic is issued and false is returned after recovery.
+    ///
+    /// If the input is malformed, this emits the specified diagnostic and true is
     /// returned.
-    bool ExpectAndConsume(tok::TokenKind ExpectedTok, unsigned DiagID,
-                        const char *DiagMsg = "",
-                        tok::TokenKind SkipToTok = tok::unknown);
+
+    bool ExpectAndConsume(tok::TokenKind ExpectedTok,
+                          unsigned DiagID = diag::err_expected,
+                          const char* DiagMsg = "");
 
     bool ExpectAndConsumeSemi(unsigned DiagID);
 
@@ -336,32 +369,44 @@ private:
     DiagnosticBuilder Diag(const Token &T, unsigned DiagID);
 
 public:
+  /// \brief Control flags for SkipUntil functions.
+  enum SkipUntilFlags {
+    StopAtSemi = 1 << 0,  ///< Stop skipping at semicolon
+    /// \brief Stop skipping at specified token, but don't skip the token itself
+    StopBeforeMatch = 1 << 1,
+    StopAtCodeCompletion = 1 << 2 ///< Stop at code completion
+  };
+
+  friend constexpr SkipUntilFlags operator|(SkipUntilFlags L,
+                                                 SkipUntilFlags R) {
+    return static_cast<SkipUntilFlags>(static_cast<unsigned>(L) |
+                                       static_cast<unsigned>(R));
+  }
+
   /// SkipUntil - Read tokens until we get to the specified token, then consume
-  /// it (unless DontConsume is true).  Because we cannot guarantee that the
-  /// token will ever occur, this skips to the next token, or to some likely
-  /// good stopping point.  If StopAtSemi is true, skipping will stop at a ';'
-  /// character.
+  /// it (unless StopBeforeMatch is specified).  Because we cannot guarantee
+  /// that the token will ever occur, this skips to the next token, or to some
+  /// likely good stopping point.  If Flags has StopAtSemi flag, skipping will
+  /// stop at a ';' character.
   ///
   /// If SkipUntil finds the specified token, it returns true, otherwise it
   /// returns false.
-  bool SkipUntil(tok::TokenKind T, bool StopAtSemi = true,
-                 bool DontConsume = false, bool StopAtCodeCompletion = false) {
-    return SkipUntil(llvm::makeArrayRef(T), StopAtSemi, DontConsume,
-                     StopAtCodeCompletion);
+  bool SkipUntil(tok::TokenKind T,
+                 SkipUntilFlags Flags = static_cast<SkipUntilFlags>(0)) {
+    return SkipUntil(llvm::makeArrayRef(T), Flags);
   }
-  bool SkipUntil(tok::TokenKind T1, tok::TokenKind T2, bool StopAtSemi = true,
-                 bool DontConsume = false, bool StopAtCodeCompletion = false) {
+  bool SkipUntil(tok::TokenKind T1, tok::TokenKind T2,
+                 SkipUntilFlags Flags = static_cast<SkipUntilFlags>(0)) {
     tok::TokenKind TokArray[] = {T1, T2};
-    return SkipUntil(TokArray, StopAtSemi, DontConsume,StopAtCodeCompletion);
+    return SkipUntil(TokArray, Flags);
   }
   bool SkipUntil(tok::TokenKind T1, tok::TokenKind T2, tok::TokenKind T3,
-                 bool StopAtSemi = true, bool DontConsume = false,
-                 bool StopAtCodeCompletion = false) {
+                 SkipUntilFlags Flags = static_cast<SkipUntilFlags>(0)) {
     tok::TokenKind TokArray[] = {T1, T2, T3};
-    return SkipUntil(TokArray, StopAtSemi, DontConsume,StopAtCodeCompletion);
+    return SkipUntil(TokArray, Flags);
   }
-  bool SkipUntil(ArrayRef<tok::TokenKind> Toks, bool StopAtSemi = true,
-                 bool DontConsume = false, bool StopAtCodeCompletion = false);
+  bool SkipUntil(ArrayRef<tok::TokenKind> Toks,
+                 SkipUntilFlags Flags = static_cast<SkipUntilFlags>(0));
 
 private:
     C2Parser(const C2Parser&);

@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,19 +14,48 @@
  */
 
 #include <time.h>
-#include <stdio.h>
+#include <sys/time.h>
+#include <string.h>
 
 #include "Utils/Utils.h"
 
 using namespace C2;
 
-u_int64_t Utils::getCurrentTime()
+uint64_t Utils::getCurrentTime()
 {
+#ifdef __APPLE__
+    struct timeval now;
+    gettimeofday(&now, NULL);
+    uint64_t now64 = now.tv_sec;
+    now64 *= 1000000;
+    now64 += now.tv_usec;
+    return now64;
+#else
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
-    u_int64_t now64 = now.tv_sec;
+    uint64_t now64 = now.tv_sec;
     now64 *= 1000000;
     now64 += (now.tv_nsec/1000);
     return now64;
+#endif
+}
+
+bool Utils::endsWith(const char* text, const char* tail) {
+    int len1 = strlen(text);
+    int len2 = strlen(tail);
+    if (len1 < len2) return 0;
+
+    int start = len1 - len2;
+    return (strcmp(text + start, tail) == 0);
+}
+
+const char* Utils::getFileName(const std::string& s) {
+    const char* input = s.c_str();
+    const char* cp = input + strlen(input) - 1;
+    while (cp != input) {
+        if (*cp == '/') return cp+1;
+        cp--;
+    }
+    return cp;
 }
 

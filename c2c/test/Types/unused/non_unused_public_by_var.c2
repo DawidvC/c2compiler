@@ -1,7 +1,0 @@
-// @warnings{no-unused-variable}
-module test;
-
-public type Number int;
-
-public Number n;
-

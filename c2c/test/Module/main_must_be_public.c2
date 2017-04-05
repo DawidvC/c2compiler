@@ -1,7 +1,0 @@
-module test;
-
-func int main() {   // @error{function 'main' should be declared public}
-    return 0;
-}
-
-

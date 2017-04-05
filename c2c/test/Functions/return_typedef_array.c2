@@ -1,9 +1,0 @@
-// @skip
-module test;
-
-type Point int[2];
-
-func Point test1() { // @error{function cannot return array type 'Point' (aka 'int[2]'}
-    return 0;
-}
-

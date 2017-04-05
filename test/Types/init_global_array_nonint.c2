@@ -1,0 +1,6 @@
+// @warnings{no-unused}
+module test;
+
+const bool B = true;
+int32[B] c;      // @error{size of array has non-integer type 'bool'}
+

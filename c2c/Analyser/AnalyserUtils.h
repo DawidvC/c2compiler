@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,11 +20,10 @@
 
 namespace C2 {
 
-class StringBuilder;
-
 class AnalyserUtils {
 public:
-    static const char* fullName(const std::string& modName, const std::string& symname);
+    static const char* fullName(const std::string& modName, const char* symname);
+    static const char* splitStructFunctionName(char* structName, const char* funcName);
 };
 
 }

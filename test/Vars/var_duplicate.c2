@@ -1,0 +1,5 @@
+module test;
+
+int32 a;      // @note{previous definition is here}
+int32 a;      // @error{redefinition of a}
+

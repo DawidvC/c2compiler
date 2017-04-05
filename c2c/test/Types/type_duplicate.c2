@@ -1,5 +1,0 @@
-module test;
-
-type Number int;
-type Number uint16;        // @error{redefinition of Number}
-

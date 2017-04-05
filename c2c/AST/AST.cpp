@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,13 +13,8 @@
  * limitations under the License.
  */
 
-#include <iostream>
-#include <stdlib.h>
 #include <stdio.h>
-#include <string.h>
 
-#include "AST/Decl.h"
-#include "AST/Expr.h"
 #include "AST/AST.h"
 #include "Utils/StringBuilder.h"
 #include "Utils/color.h"
@@ -29,7 +24,7 @@
 using namespace C2;
 
 void AST::print(bool colors) const {
-    StringBuilder buffer;
+    StringBuilder buffer(4*1024*1024);
     buffer.enableColor(colors);
     buffer << "---- AST " << "(module=" << modName << ") " << filename << " ----\n";
     // ImportDecls
@@ -57,12 +52,9 @@ void AST::print(bool colors) const {
         functionList[i]->print(buffer, 0);
         buffer << '\n';
     }
+
     buffer.setColor(COL_NORM);
-    printf("%s", (const char*)buffer);
+    buffer << '\n';
+    printf("%s", buffer.c_str());
 }
-
-void AST::addSymbol(Decl* d) {
-    symbols[d->getName()] = d;
-}
-
 

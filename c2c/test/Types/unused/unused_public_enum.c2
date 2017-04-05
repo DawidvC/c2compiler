@@ -1,7 +1,0 @@
-// @warnings{no-unused-variable}
-module test;
-
-public type State enum uint16 { STATE_A }   // @warning{type 'State' is not used public}
-
-int b = STATE_A;
-

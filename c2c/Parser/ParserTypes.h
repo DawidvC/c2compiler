@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 #define PARSER_TYPES_H
 
 #include <clang/Lex/Preprocessor.h>
-#include <clang/Sema/Ownership.h>
+#include "Parser/Ownership.h"
 
 #define TYPE_CONST      (1<<1)
 #define TYPE_VOLATILE   (1<<2)
@@ -28,11 +28,12 @@ namespace C2 {
 class Decl;
 class Expr;
 class Stmt;
+class VarDecl;
 
 typedef clang::ActionResult<C2::Expr*> ExprResult;
 typedef clang::ActionResult<C2::Stmt*> StmtResult;
 typedef clang::ActionResult<C2::Decl*> DeclResult;
-typedef std::vector<C2::Expr*> ExprList;
+typedef clang::ActionResult<C2::VarDecl*> VarDeclResult;
 
 }
 

@@ -1,7 +1,0 @@
-module multi;
-
-func int getNumber2() {
-    getNumber1();
-    return 20;
-}
-

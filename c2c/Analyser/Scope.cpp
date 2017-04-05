@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -22,7 +22,6 @@
 #include "Analyser/Scope.h"
 #include "Analyser/AnalyserUtils.h"
 #include "AST/Decl.h"
-#include "AST/Expr.h"
 
 using namespace C2;
 using namespace clang;
@@ -38,22 +37,15 @@ Scope::Scope(const std::string& name_, const Modules& modules_, clang::Diagnosti
     , Diags(Diags_)
 {
     // add own module to scope
-    myModule = findAnyModule(name_);
+    myModule = findAnyModule(name_.c_str());
     assert(myModule);
 }
 
-bool Scope::addImportDecl(ImportDecl* importDecl) {
-    clang::SourceLocation Loc = importDecl->getLocation();
-    if (importDecl->getAliasLocation().isValid()) {
-        Loc = importDecl->getAliasLocation();
-    }
-    const Module* mod = findAnyModule(importDecl->getModuleName());
-    assert(mod);
-    importDecl->setModule(mod);
-    if (importDecl->isLocal()) locals.push_back(mod);
+void Scope::addImportDecl(ImportDecl* importDecl) {
+    assert(importDecl->getModule());
+    if (importDecl->isLocal()) locals.push_back(importDecl->getModule());
     importedModules[importDecl->getName()] = importDecl;
     symbolCache[importDecl->getName()] = importDecl;
-    return true;
 }
 
 bool Scope::checkScopedSymbol(const VarDecl* V) const {
@@ -66,15 +58,15 @@ bool Scope::checkScopedSymbol(const VarDecl* V) const {
     }
 
     // lookup in all used local (= also own)
-    for (LocalsConstIter iter = locals.begin(); iter != locals.end(); ++iter) {
-        Old = (*iter)->findSymbol(V->getName());
+    for (LocalsConstIter iter2 = locals.begin(); iter2 != locals.end(); ++iter2) {
+        Old = (*iter2)->findSymbol(V->getName());
         if (Old) goto err;
     }
     return true;
 err:
-        Diags.Report(V->getLocation(), diag::err_redefinition)
+    Diags.Report(V->getLocation(), diag::err_redefinition)
             << V->getName();
-        Diags.Report(Old->getLocation(), diag::note_previous_definition);
+    Diags.Report(Old->getLocation(), diag::note_previous_definition);
     return false;
 }
 
@@ -85,25 +77,35 @@ void Scope::addScopedSymbol(VarDecl* V) {
     symbolCache[V->getName()] = V;
 }
 
-const Module* Scope::findUsedModule(const std::string& name, clang::SourceLocation loc) const {
+const Module* Scope::findUsedModule(const std::string& name, clang::SourceLocation loc, bool usedPublic) const {
     ImportsConstIter iter = importedModules.find(name);
     if (iter != importedModules.end()) {
-        ImportDecl* U = iter->second;
-        U->setUsed();
-        return U->getModule();
+        ImportDecl* I = iter->second;
+        I->setUsed();
+        if (usedPublic) {
+            // TODO refactor common code
+            // TODO check if using non-exported module from exported one
+            I->setUsedPublic();
+        }
+        return I->getModule();
     }
 
     // check if used with alias (then fullname is forbidden)
-    for (ImportsConstIter iter = importedModules.begin(); iter != importedModules.end(); ++iter) {
-        ImportDecl* U = iter->second;
-        U->setUsed();
-        const Module* p = U->getModule();
+    for (ImportsConstIter iter2 = importedModules.begin(); iter2 != importedModules.end(); ++iter2) {
+        ImportDecl* I = iter2->second;
+        I->setUsed();
+        if (usedPublic) {
+            // TODO refactor common code
+            // TODO check if using non-exported module from exported one
+            I->setUsedPublic();
+        }
+        const Module* p = I->getModule();
         if (p->getName() == name) {
-            Diags.Report(loc, diag::err_module_has_alias) << name << iter->first;
+            Diags.Report(loc, diag::err_module_has_alias) << name << iter2->first;
             return 0;
         }
     }
-    const Module* P2 = findAnyModule(name);
+    const Module* P2 = findAnyModule(name.c_str());
     if (P2) {
         Diags.Report(loc, diag::err_module_not_used) << name;
     } else {
@@ -112,17 +114,33 @@ const Module* Scope::findUsedModule(const std::string& name, clang::SourceLocati
     return 0;
 }
 
-Decl* Scope::findSymbol(const std::string& symbol, clang::SourceLocation loc, bool isType) const {
+Decl* Scope::findSymbol(const std::string& symbol, clang::SourceLocation loc, bool isType, bool usedPublic) const {
     // lookup in global cache first, return if found
-    CacheConstIter iter = symbolCache.find(symbol);
-    if (iter != symbolCache.end()) {
-        return iter->second;
+    Decl* D = 0;
+    {
+        CacheConstIter iter = symbolCache.find(symbol);
+        if (iter != symbolCache.end()) {
+            D = iter->second;
+            // update usedPublic if needed
+            // TODO also cache this part?
+            if (usedPublic && D->getModule() != myModule) {
+                ImportsConstIter iter = importedModules.begin();
+                while (iter != importedModules.end()) {
+                    ImportDecl* I = iter->second;
+                    if (D->getModule() == I->getModule()) {
+                        I->setUsedPublic();
+                        break;
+                    }
+                    ++iter;
+                }
+            }
+            return D;
+        }
     }
 
     // lookup in used module list
     bool ambiguous = false;
     bool visible_match = false;
-    Decl* D = 0;
     for (LocalsConstIter iter = locals.begin(); iter != locals.end(); ++iter) {
         const Module* mod = *iter;
         Decl* decl = mod->findSymbol(symbol);
@@ -137,12 +155,12 @@ Decl* Scope::findSymbol(const std::string& symbol, clang::SourceLocation loc, bo
                     // NASTY: are different FileManagers!
                     // TEMP just use 0 location
                     Diags.Report(SourceLocation(), diag::note_function_suggestion)
-                        << AnalyserUtils::fullName(D->getModule()->getName(), D->getName());
+                            << AnalyserUtils::fullName(D->getModule()->getName(), D->getName());
 
                     ambiguous = true;
                 }
                 Diags.Report(SourceLocation(), diag::note_function_suggestion)
-                    << AnalyserUtils::fullName(mod->getName(), decl->getName());
+                        << AnalyserUtils::fullName(mod->getName(), decl->getName());
 
                 continue;
             }
@@ -159,18 +177,25 @@ Decl* Scope::findSymbol(const std::string& symbol, clang::SourceLocation loc, bo
 
     if (D) {
         // mark ImportDecl as used
-        ImportsConstIter iter = importedModules.begin();
-        while (iter != importedModules.end()) {
-            ImportDecl* Use = iter->second;
-            if (D->getModule() == Use->getModule()) {
-                Use->setUsed();
-                break;
+        if (D->getModule() != myModule) {
+            ImportsConstIter iter = importedModules.begin();
+            while (iter != importedModules.end()) {
+                ImportDecl* I = iter->second;
+                if (D->getModule() == I->getModule()) {
+                    I->setUsed();
+                    if (usedPublic) {
+                        I->setUsedPublic();
+                        // TODO refactor common code
+                        // TODO check if using non-exported module from exported one
+                    }
+                    break;
+                }
+                ++iter;
             }
-            ++iter;
         }
 
         if (!visible_match) {
-            Diags.Report(loc, diag::err_not_public) << symbol;
+            Diags.Report(loc, diag::err_not_public) << AnalyserUtils::fullName(D->getModule()->getName(), D->getName());
             return 0;
         }
         if (isExternal(D->getModule())) D->setUsedPublic();
@@ -182,17 +207,17 @@ Decl* Scope::findSymbol(const std::string& symbol, clang::SourceLocation loc, bo
         } else {
             Diags.Report(loc, diag::err_undeclared_var_use) << symbol;
         }
-/*
-        ScopeResult res2 = scope.findSymbolInUsed(symbol);
-        Decl* D2 = res2.getDecl();
-        if (D2) {
-            assert(D2->getModule());
-            // Crashes if ambiguous
-            Diags.Report(D->getLocation(), diag::note_function_suggestion)
-                << AnalyserUtils::fullName(D2->getModule()->getName(), id->getName());
-        }
+        /*
+                ScopeResult res2 = scope.findSymbolInUsed(symbol);
+                Decl* D2 = res2.getDecl();
+                if (D2) {
+                    assert(D2->getModule());
+                    // Crashes if ambiguous
+                    Diags.Report(D->getLocation(), diag::note_function_suggestion)
+                        << AnalyserUtils::fullName(D2->getModule()->getName(), id->getName());
+                }
 
-*/
+        */
     }
     // TODO make suggestion otherwise? (used Modules w/alias, other modules?)
     return 0;
@@ -207,12 +232,25 @@ Decl* Scope::findSymbolInModule(const std::string& name, clang::SourceLocation l
     // if external module, check visibility
     if (isExternal(mod)) {
         if (!D->isPublic()) {
-            Diags.Report(loc, diag::err_not_public) << AnalyserUtils::fullName(mod->getName(), name);
+            Diags.Report(loc, diag::err_not_public) << AnalyserUtils::fullName(mod->getName(), name.c_str());
             return 0;
         }
         D->setUsedPublic();
     }
     return D;
+}
+
+void Scope::checkAccess(Decl* D, clang::SourceLocation loc) const {
+    const Module* mod = D->getModule();
+    assert(mod);
+    // if external module, check visibility
+    if (isExternal(mod)) {
+        if (!D->isPublic()) {
+            Diags.Report(loc, diag::err_not_public) << AnalyserUtils::fullName(mod->getName(), D->getName());
+            return;
+        }
+        D->setUsedPublic();
+    }
 }
 
 #if 0
@@ -263,7 +301,7 @@ void Scope::ExitScope() {
         if (!D->isUsed()) {
             unsigned msg = diag::warn_unused_variable;
             if (D->isParameter()) msg = diag::warn_unused_parameter;
-            Diags.Report(D->getLocation(), msg) << D->getName();
+            Diags.Report(D->getLocation(), msg) << D->DiagName();
         }
         // remove from symbol cache
         CacheIter iter = symbolCache.find(D->getName());
@@ -278,8 +316,8 @@ void Scope::ExitScope() {
     else curScope = &scopes[scopeIndex-1];
 }
 
-const Module* Scope::findAnyModule(const std::string& name) const {
-    ModulesConstIter iter = allModules.find(name);
+const Module* Scope::findAnyModule(const char* name_) const {
+    ModulesConstIter iter = allModules.find(name_);
     if (iter == allModules.end()) return 0;
     return iter->second;
 }

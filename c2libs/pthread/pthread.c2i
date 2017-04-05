@@ -1,0 +1,19 @@
+module pthread;
+
+import c2 local;
+
+type pthread_t c_ulong;
+
+type pthread_attr_t struct {
+    c_char[64]  __size; // NOTE: 32 on 32-bit
+    c_long __align;
+}
+
+type ThreadFunc func void*(void*);
+
+func c_int pthread_create(pthread_t* __newthread,
+                          const pthread_attr_t* __attr,
+                          ThreadFunc __start_routine,
+                          void* __arg);
+
+func c_int pthread_join(pthread_t thread, void** value_ptr);

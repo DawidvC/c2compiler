@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,14 +17,13 @@
 #define AST_DECL_H
 
 #include <string>
-#include <vector>
 #include <assert.h>
 
 #include <llvm/ADT/APSInt.h>
 #include <clang/Basic/SourceLocation.h>
 
-#include "AST/OwningVector.h"
 #include "AST/Type.h"
+#include "AST/Attr.h"
 
 using clang::SourceLocation;
 
@@ -35,11 +34,11 @@ class Value;
 
 namespace C2 {
 class StringBuilder;
-class Stmt;
 class Expr;
-class ArrayValueDecl;
 class CompoundStmt;
+class LabelStmt;
 class Module;
+class ASTContext;
 
 enum DeclKind {
     DECL_FUNC = 0,
@@ -50,30 +49,42 @@ enum DeclKind {
     DECL_ENUMTYPE,
     DECL_FUNCTIONTYPE,
     DECL_ARRAYVALUE,
-    DECL_IMPORT
+    DECL_IMPORT,
+    DECL_LABEL
 };
 
-class Decl {
+class alignas(void*) Decl {
 public:
-    Decl(DeclKind k, const std::string& name_, SourceLocation loc_,
-         QualType type_, bool is_public, unsigned file_id);
-    virtual ~Decl();
+    Decl(DeclKind k, const char* name_, SourceLocation loc_,
+         QualType type_, bool is_public);
 
-    virtual void print(StringBuilder& buffer, unsigned indent) const = 0;
+    void* operator new(size_t bytes, const ASTContext& C, unsigned alignment = 8);
 
-    const std::string& getName() const { return name; }
+    void print(StringBuilder& buffer, unsigned indent) const;
+    void printAttributes(StringBuilder& buffer, unsigned indent) const;
+
+    const char* getName() const { return name; }
+    bool hasEmptyName() const { return name[0] == 0; }
+    void fullName(StringBuilder& output) const;
+    std::string DiagName() const;
     SourceLocation getLocation() const { return loc; }
 
-    DeclKind getKind() const { return static_cast<DeclKind>(DeclBits.dKind); }
-    bool isPublic() const { return DeclBits.DeclIsPublic; }
-    bool isUsed() const { return DeclBits.DeclIsUsed; }
-    bool isUsedPublic() const { return DeclBits.DeclIsUsedPublic; }
-    void setUsed() { DeclBits.DeclIsUsed = true; }
-    void setUsedPublic() { DeclBits.DeclIsUsedPublic = true; }
+    DeclKind getKind() const { return static_cast<DeclKind>(declBits.dKind); }
+    bool isExported() const { return declBits.IsExported; }
+    void setExported() { declBits.IsExported = true; }
+    bool isPublic() const { return declBits.IsPublic; }
+    void setPublic(bool isPublic) { declBits.IsPublic = isPublic; }
+    bool isUsed() const { return declBits.IsUsed; }
+    void setUsed() { declBits.IsUsed = true; }
+    bool isUsedPublic() const { return declBits.IsUsedPublic; }
+    void setUsedPublic() { declBits.IsUsedPublic = true; }
+    void setHasAttributes() { declBits.HasAttributes = true; }
+    bool hasAttributes() const { return declBits.HasAttributes; }
+    bool hasAttribute(AttrKind kind) const;
+    const AttrList& getAttributes() const;
 
     void setModule(const Module* mod_) { mod = mod_; }
     const Module* getModule() const { return mod; }
-    unsigned getFileID() const { return DeclBits.DeclFileID; }
 
     QualType getType() const { return type; }
     void setType(QualType t) { type = t; }
@@ -81,29 +92,82 @@ public:
     // for debugging
     void dump() const;
 protected:
-    const std::string name;
-    SourceLocation loc;
-    QualType type;
+    void* operator new(size_t bytes) noexcept {
+        assert(0 && "Decl cannot be allocated with regular 'new'");
+        return 0;
+    }
+    void operator delete(void* data) {
+        assert(0 && "Decl cannot be released with regular 'delete'");
+    }
+
+    void printPublic(StringBuilder& buffer) const;
 
     class DeclBitfields {
-    public:
-        unsigned dKind : 8;
-        unsigned DeclFileID : 10;   // 10 bits for now
-        unsigned DeclIsPublic : 1;
-        unsigned DeclIsUsed : 1;
-        unsigned DeclIsUsedPublic : 1;
-        unsigned varDeclKind: 2;
-        unsigned VarDeclHasLocalQualifier : 1;
-        unsigned StructTypeIsStruct : 1;
-        unsigned StructTypeIsGlobal : 1;
-        unsigned FuncIsVariadic : 1;
-        unsigned FuncHasDefaultArgs : 1;
-        unsigned ImportIsLocal : 1;
+        friend class Decl;
+
+        unsigned dKind : 4;
+        unsigned IsExported: 1;
+        unsigned IsPublic : 1;
+        unsigned IsUsed : 1;
+        unsigned IsUsedPublic : 1;
+        unsigned HasAttributes : 1;
     };
+    enum { NumDeclBits = 16 };
+
+    class VarDeclBits {
+        friend class VarDecl;
+        unsigned : NumDeclBits;
+
+        unsigned Kind: 2;
+        unsigned HasLocalQualifier : 1;
+    };
+
+    class StructTypeDeclBits {
+        friend class StructTypeDecl;
+        unsigned : NumDeclBits;
+
+        unsigned numMembers : 8;
+        unsigned numStructFunctions : 6;
+        unsigned IsStruct : 1;
+        unsigned IsGlobal : 1;
+    };
+
+    class EnumTypeDeclBits {
+        friend class EnumTypeDecl;
+        unsigned : NumDeclBits;
+
+        unsigned numConstants : 15;
+        unsigned incremental : 1;
+    };
+
+    class FunctionDeclBits {
+        friend class FunctionDecl;
+        unsigned : NumDeclBits;
+
+        unsigned structFuncNameOffset : 8;
+        unsigned numArgs : 6;
+        unsigned IsVariadic : 1;
+        unsigned HasDefaultArgs : 1;
+    };
+
+    class ImportDeclBits {
+        friend class ImportDecl;
+        unsigned : NumDeclBits;
+
+        unsigned IsLocal : 1;
+    };
+
     union {
-        DeclBitfields DeclBits;
-        unsigned BitsInit;      // to initialize all bits
+        DeclBitfields declBits;
+        VarDeclBits varDeclBits;
+        StructTypeDeclBits structTypeDeclBits;
+        EnumTypeDeclBits enumTypeDeclBits;
+        FunctionDeclBits functionDeclBits;
+        ImportDeclBits importDeclBits;
     };
+    SourceLocation loc;
+    QualType type;
+    const char* name;
 private:
     const Module* mod;
 
@@ -121,50 +185,44 @@ enum VarDeclKind {
 
 class VarDecl : public Decl {
 public:
-    VarDecl(VarDeclKind k_, const std::string& name_, SourceLocation loc_,
-            QualType type_, Expr* initValue_, bool is_public, unsigned file_id);
-    virtual ~VarDecl();
+    VarDecl(VarDeclKind k_, const char* name_, SourceLocation loc_,
+            QualType type_, Expr* initValue_, bool is_public);
     static bool classof(const Decl* D) {
         return D->getKind() == DECL_VAR;
     }
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
+    void print(StringBuilder& buffer, unsigned indent) const;
 
     Expr* getInitValue() const { return initValue; }
+    void setInitValue(Expr* v) {
+        assert(initValue == 0);
+        initValue = v;
+    }
 
-    void setLocalQualifier() { DeclBits.VarDeclHasLocalQualifier = true; }
-    bool hasLocalQualifier() const { return DeclBits.VarDeclHasLocalQualifier; }
+    void setLocalQualifier() { varDeclBits.HasLocalQualifier = true; }
+    bool hasLocalQualifier() const { return varDeclBits.HasLocalQualifier; }
     bool isParameter() const { return getVarKind() == VARDECL_PARAM; }
     bool isGlobal() const { return getVarKind() == VARDECL_GLOBAL; }
-    VarDeclKind getVarKind() const { return static_cast<VarDeclKind>(DeclBits.varDeclKind); }
-
-#if 0
-    // TODO move to ArrayVarDecl subclass
-    typedef std::vector<ArrayValueDecl*> InitValues;
-    typedef InitValues::const_iterator InitValuesConstIter;
-    const InitValues& getIncrValues() const { return initValues; }
-    void addInitValue(ArrayValueDecl* value);
-#endif
+    VarDeclKind getVarKind() const { return static_cast<VarDeclKind>(varDeclBits.Kind); }
+    QualType getOrigType() const { return origType; }
 
     // for codegen
     llvm::Value* getIRValue() const { return IRValue; }
     void setIRValue(llvm::Value* v) const { IRValue = v; }
 private:
+    QualType origType;
     Expr* initValue;
-    // TODO remove, since only for Incremental Arrays (subclass VarDecl -> GlobalVarDecl)
-    //InitValues initValues;
     mutable llvm::Value* IRValue;
 };
 
 
 class FunctionDecl : public Decl {
 public:
-    FunctionDecl(const std::string& name_, SourceLocation loc_,
-                 bool is_public, unsigned file_id, QualType rtype_);
-    virtual ~FunctionDecl();
+    FunctionDecl(const char* name_, SourceLocation loc_,
+                 bool is_public, QualType rtype_);
     static bool classof(const Decl* D) {
         return D->getKind() == DECL_FUNC;
     }
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
+    void print(StringBuilder& buffer, unsigned indent) const;
 
     void setBody(CompoundStmt* body_) {
         assert(body == 0);
@@ -172,29 +230,40 @@ public:
     }
     CompoundStmt* getBody() const { return body; }
 
+    void setStructFuncNameOffset(unsigned offset) { functionDeclBits.structFuncNameOffset = offset; }
+    bool matchesStructFuncName(const char* name_) const {
+        return strcmp(name + functionDeclBits.structFuncNameOffset, name_) == 0;
+    }
+
     // args
-    void addArg(VarDecl* arg) { args.push_back(arg); }
-    VarDecl* findArg(const std::string& name) const;
+    void setArgs(VarDecl** args_, unsigned numArgs_) {
+        assert(args == 0);
+        args = args_;
+        functionDeclBits.numArgs = numArgs_;
+    }
     VarDecl* getArg(unsigned i) const { return args[i]; }
-    unsigned numArgs() const { return args.size(); }
+    unsigned numArgs() const { return functionDeclBits.numArgs; }
     unsigned minArgs() const;
-    void setVariadic() { DeclBits.FuncIsVariadic = true; }
-    bool isVariadic() const { return DeclBits.FuncIsVariadic; }
-    void setDefaultArgs() { DeclBits.FuncHasDefaultArgs = true; }
-    bool hasDefaultArgs() const { return DeclBits.FuncHasDefaultArgs; }
+    void setVariadic() { functionDeclBits.IsVariadic = true; }
+    bool isVariadic() const { return functionDeclBits.IsVariadic; }
+    void setDefaultArgs() { functionDeclBits.HasDefaultArgs = true; }
+    bool hasDefaultArgs() const { return functionDeclBits.HasDefaultArgs; }
 
     // return type
     QualType getReturnType() const { return rtype; }
-    void updateReturnType(QualType rt) { rtype = rt; }
+    QualType getOrigReturnType() const { return origRType; }
+    void setReturnType(QualType rt) { rtype = rt; }
+
+    static bool sameProto(const FunctionDecl* lhs, const FunctionDecl* rhs);
 
     // for codegen
     llvm::Function* getIRProto() const { return IRProto; }
     void setIRProto(llvm::Function* f) const { IRProto = f; }
 private:
     QualType rtype;
+    QualType origRType;
 
-    typedef OwningVector<VarDecl> Args;
-    Args args;
+    VarDecl** args;
     CompoundStmt* body;
     mutable llvm::Function* IRProto;
 };
@@ -202,13 +271,12 @@ private:
 
 class EnumConstantDecl : public Decl {
 public:
-    EnumConstantDecl(const std::string& name_, SourceLocation loc_, QualType type_, Expr* Init,
-                     bool is_public, unsigned file_id);
-    virtual ~EnumConstantDecl();
+    EnumConstantDecl(const char* name_, SourceLocation loc_, QualType type_, Expr* Init,
+                     bool is_public);
     static bool classof(const Decl* D) {
         return D->getKind() == DECL_ENUMVALUE;
     }
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
+    void print(StringBuilder& buffer, unsigned indent) const;
 
     Expr* getInitValue() const { return InitVal; } // static value, NOT incremental values
     llvm::APSInt getValue() const { return Val; }
@@ -221,8 +289,8 @@ private:
 
 class TypeDecl : public Decl {
 protected:
-    TypeDecl(DeclKind kind, const std::string& name_, SourceLocation loc_,
-             QualType type_, bool is_public, unsigned file_id);
+    TypeDecl(DeclKind kind, const char* name_, SourceLocation loc_,
+             QualType type_, bool is_public);
 public:
     static bool classof(const Decl* D) {
         switch (D->getKind()) {
@@ -240,14 +308,14 @@ public:
 
 class AliasTypeDecl : public TypeDecl {
 public:
-    AliasTypeDecl(const std::string& name_, SourceLocation loc_, QualType type_, bool is_public, unsigned file_id)
-        : TypeDecl(DECL_ALIASTYPE, name_, loc_, type_, is_public, file_id)
+    AliasTypeDecl(const char* name_, SourceLocation loc_, QualType type_, bool is_public)
+        : TypeDecl(DECL_ALIASTYPE, name_, loc_, type_, is_public)
         , refType(type_)
     {}
     static bool classof(const Decl* D) {
         return D->getKind() == DECL_ALIASTYPE;
     }
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
+    void print(StringBuilder& buffer, unsigned indent) const;
     QualType getRefType() const { return refType; }
 private:
     QualType refType;
@@ -256,70 +324,84 @@ private:
 
 class StructTypeDecl : public TypeDecl {
 public:
-    StructTypeDecl(const std::string& name_, SourceLocation loc_, QualType type_,
-            bool is_struct, bool is_global, bool is_public, unsigned file_id);
+    StructTypeDecl(const char* name_, SourceLocation loc_, QualType type_,
+            bool is_struct, bool is_global, bool is_public);
     static bool classof(const Decl* D) {
         return D->getKind() == DECL_STRUCTTYPE;
     }
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
+    void print(StringBuilder& buffer, unsigned indent) const;
 
-    void addMember(Decl* D);
-    unsigned numMembers() const { return members.size(); }
+    void setMembers(Decl** members_, unsigned numMembers_) {
+        assert(members == 0);
+        members = members_;
+        structTypeDeclBits.numMembers = numMembers_;
+    }
+    void setStructFuncs(FunctionDecl** funcs, unsigned numFuncs) {
+        assert(structFunctions == 0);
+        structFunctions = funcs;
+        structTypeDeclBits.numStructFunctions = numFuncs;
+    }
+
+    unsigned numMembers() const { return structTypeDeclBits.numMembers; }
+    unsigned numStructFunctions() const { return structTypeDeclBits.numStructFunctions; }
     Decl* getMember(unsigned index) const { return members[index]; }
-    Decl* find(const std::string& name_) const {
-        for (unsigned i=0; i<members.size(); i++) {
-            Decl* D = members[i];
-            if (D->getName() == name_) return D;
-        }
-        return 0;
-    }
-    int findIndex(const std::string& name_) const {
-        for (unsigned i=0; i<members.size(); i++) {
-            Decl* D = members[i];
-            if (D->getName() == name_) return i;
-        }
-        return -1;
-    }
+    Decl* find(const char* name_) const;
+    Decl* findFunction(const char* name_) const;
+    int findIndex(const char*  name_) const;
+    void setOpaqueMembers();
 
-    bool isStruct() const { return DeclBits.StructTypeIsStruct; }
-    bool isGlobal() const { return DeclBits.StructTypeIsGlobal; }
+    bool isStruct() const { return structTypeDeclBits.IsStruct; }
+    bool isGlobal() const { return structTypeDeclBits.IsGlobal; }
 private:
-    typedef OwningVector<Decl> Members;
-    Members members;
+    Decl** members;
+    FunctionDecl** structFunctions;
 };
 
 class EnumTypeDecl : public TypeDecl {
 public:
-    EnumTypeDecl(const std::string& name_, SourceLocation loc_,
-            QualType implType_, QualType type_, bool is_public, unsigned file_id)
-        : TypeDecl(DECL_ENUMTYPE, name_, loc_, type_, is_public, file_id)
+    EnumTypeDecl(const char* name_, SourceLocation loc_,
+            QualType implType_, QualType type_, bool is_incr, bool is_public)
+        : TypeDecl(DECL_ENUMTYPE, name_, loc_, type_, is_public)
+        , constants(0)
         , implType(implType_)
-    {}
+    {
+        enumTypeDeclBits.incremental = is_incr;
+        enumTypeDeclBits.numConstants = 0;
+    }
     static bool classof(const Decl* D) {
         return D->getKind() == DECL_ENUMTYPE;
     }
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
+    void print(StringBuilder& buffer, unsigned indent) const;
 
-    void addConstant(EnumConstantDecl* c) { constants.push_back(c); }
-    unsigned numConstants() const { return constants.size(); }
-    EnumConstantDecl* getConstant(unsigned index) const { return constants[index]; }
+    void setConstants(EnumConstantDecl** constants_, unsigned numConstants_) {
+        assert(constants == 0);
+        constants = constants_;
+        enumTypeDeclBits.numConstants = numConstants_;
+    }
+    unsigned numConstants() const { return enumTypeDeclBits.numConstants; }
+    EnumConstantDecl* getConstant(unsigned i) const { return constants[i]; }
 
+    bool isIncremental() const { return enumTypeDeclBits.incremental; }
+
+    int getIndex(const EnumConstantDecl* c) const;
+    bool hasConstantValue(llvm::APSInt Val) const;
+    QualType getImplType() const { return implType; }
+
+    llvm::APSInt getMinValue() const;
+    llvm::APSInt getMaxValue() const;
 private:
-    typedef OwningVector<EnumConstantDecl> Constants;
-    Constants constants;
-    // TODO use
+    EnumConstantDecl** constants;
     QualType implType;
 };
 
 
 class FunctionTypeDecl : public TypeDecl {
 public:
-    FunctionTypeDecl(FunctionDecl* func_, unsigned file_id);
-    virtual ~FunctionTypeDecl();
+    FunctionTypeDecl(FunctionDecl* func_);
     static bool classof(const Decl* D) {
         return D->getKind() == DECL_FUNCTIONTYPE;
     }
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
+    void print(StringBuilder& buffer, unsigned indent) const;
 
     FunctionDecl* getDecl() const { return func; }
 private:
@@ -329,12 +411,11 @@ private:
 
 class ArrayValueDecl : public Decl {
 public:
-    ArrayValueDecl(const std::string& name_, SourceLocation loc_, Expr* value_);
-    virtual ~ArrayValueDecl();
+    ArrayValueDecl(const char* name_, SourceLocation loc_, Expr* value_);
     static bool classof(const Decl* D) {
         return D->getKind() == DECL_ARRAYVALUE;
     }
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
+    void print(StringBuilder& buffer, unsigned indent) const;
 
     Expr* getExpr() const { return value; }
 private:
@@ -344,20 +425,37 @@ private:
 
 class ImportDecl : public Decl {
 public:
-    ImportDecl(const std::string& name_, SourceLocation loc_, bool isLocal_,
-            const std::string& modName_, SourceLocation aliasLoc_);
+    ImportDecl(const char* name_, SourceLocation loc_, bool isLocal_,
+            const char* modName_, SourceLocation aliasLoc_);
     static bool classof(const Decl* D) {
         return D->getKind() == DECL_IMPORT;
     }
-    virtual void print(StringBuilder& buffer, unsigned indent) const;
+    void print(StringBuilder& buffer, unsigned indent) const;
 
-    const std::string& getModuleName() const { return modName; }
-    virtual clang::SourceLocation getAliasLocation() const { return aliasLoc; }
-    bool isLocal() const { return DeclBits.ImportIsLocal; }
+    const char* getModuleName() const { return modName; }
+    bool hasAlias() const {return aliasLoc.isValid(); }
+    bool isLocal() const { return importDeclBits.IsLocal; }
 private:
-    std::string modName;
+    const char* modName;
     SourceLocation aliasLoc;
 };
+
+
+class LabelDecl : public Decl {
+public:
+    LabelDecl(const char* name_, SourceLocation loc_);
+    static bool classof(const Decl* D) {
+        return D->getKind() == DECL_LABEL;
+    }
+    void print(StringBuilder& buffer, unsigned indent) const;
+
+    LabelStmt* getStmt() const { return TheStmt; }
+    void setStmt(LabelStmt* S) { TheStmt = S; }
+    void setLocation(SourceLocation loc_) { loc = loc_; }
+private:
+    LabelStmt* TheStmt;
+};
+
 
 template <class T> static inline bool isa(const Decl* D) {
     return T::classof(D);

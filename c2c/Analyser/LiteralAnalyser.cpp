@@ -1,4 +1,4 @@
-/* Copyright 2013,2014 Bas van den Berg
+/* Copyright 2013-2017 Bas van den Berg
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,21 +20,25 @@
 #include <clang/Parse/ParseDiagnostic.h>
 #include <clang/Sema/SemaDiagnostic.h>
 
+#include "AST/Type.h"
 #include "Analyser/LiteralAnalyser.h"
 #include "AST/Expr.h"
 #include "AST/Decl.h"
 #include "Utils/StringBuilder.h"
+#include "Utils/Utils.h"
 
 using namespace C2;
 using namespace llvm;
 using namespace clang;
 
+namespace C2 {
 struct Limit {
     int64_t minVal;
     uint64_t maxVal;
     const char* minStr;
     const char* maxStr;
 };
+}
 
 static const Limit limits [] = {
     // bool
@@ -85,39 +89,42 @@ void LiteralAnalyser::check(QualType TLeft, const Expr* Right) {
     if (Right->getCTC() == CTC_NONE) return;
     // TODO assert here instead of check?
 
-    const QualType QT = TLeft.getCanonicalType();
-    // TODO check if type is already ok?, then skip check?
-    //if (QT == Right->getType().getCanonicalType()) return;
-    int availableWidth = 0;
-    if (QT.isBuiltinType()) {
-        const BuiltinType* TL = cast<BuiltinType>(QT);
-        if (!TL->isInteger()) {
-            // TODO floats
-            return;
-        }
-        // TODO remove const cast
-        Expr* EE = const_cast<Expr*>(Right);
-        QualType Canon = EE->getType().getCanonicalType();
-        assert(Canon->isBuiltinType());
-        const BuiltinType* BI = cast<BuiltinType>(Canon);
-        if (TL->getKind() != BI->getKind()) EE->setImpCast(TL->getKind());
-        if (QT == Type::Bool()) {
-            // NOTE: any integer to bool is ok
-            return;
-        }
 
-        availableWidth = TL->getIntegerWidth();
-    } else if (QT.isPointerType()) {
-        availableWidth = 32;    // only 32-bit for now
-        // dont ask for pointer, replace with uint32 here.
-    } else {
-        QT.dump();
-        assert(0 && "todo");
+    // special case for assignments to enums
+    if (TLeft.isEnumType()) {
+        // dont check value if right is also same enum type
+        if (TLeft == Right->getType()) return;
+
+        // TODO should be done elsewhere (checking if conversion is allowed)
+        fprintf(stderr, "TODO refactor checking!!, type conversion not allowed\n");
+#if 0
+        // this part should be used when checking casting CTC's to Enum types
+        APSInt Result = checkLiterals(Right);
+
+        // check if value has matching enum constant
+        const EnumType* ET = cast<EnumType>(TLeft.getTypePtr());
+        const EnumTypeDecl* ETD = ET->getDecl();
+        assert(ETD);
+        if (!ETD->hasConstantValue(Result)) {
+            fprintf(stderr, "NO SUCH CONSTANT\n");
+
+        }
+#endif
+        return;
     }
 
+    int availableWidth = 0;
+    if (!calcWidth(TLeft, Right, &availableWidth)) return;
+
+    StringBuilder tname(128);
+    TLeft->DiagName(tname);
+    const Limit* L = getLimit(availableWidth);
+    checkWidth(availableWidth, L, Right, tname);
+}
+
+void LiteralAnalyser::checkWidth(int availableWidth, const Limit* L, const Expr* Right, const char* tname) {
     APSInt Result = checkLiterals(Right);
 
-    const Limit* L = getLimit(availableWidth);
     assert(Result.isSigned() && "TEMP FOR NOW");
     int64_t value = Result.getSExtValue();
     bool overflow = false;
@@ -137,16 +144,53 @@ void LiteralAnalyser::check(QualType TLeft, const Expr* Right) {
         SmallString<20> ss;
         Result.toString(ss, 10, true);
 
-        StringBuilder buf1;
-        TLeft->DiagName(buf1);
-
         Diags.Report(Right->getLocStart(), diag::err_literal_outofbounds)
-            << buf1 << L->minStr << L->maxStr << ss << Right->getSourceRange();
+                << tname << L->minStr << L->maxStr << ss << Right->getSourceRange();
     }
 }
 
+bool LiteralAnalyser::calcWidth(QualType TLeft, const Expr* Right, int* availableWidth) {
+    const QualType QT = TLeft.getCanonicalType();
+    // TODO check if type is already ok?, then skip check?
+    //if (QT == Right->getType().getCanonicalType()) return;
+    if (QT.isBuiltinType()) {
+        const BuiltinType* TL = cast<BuiltinType>(QT);
+        if (!TL->isInteger()) {
+            // TODO floats
+            return false;
+        }
+        // TODO remove const cast
+        Expr* EE = const_cast<Expr*>(Right);
+        QualType Canon = EE->getType().getCanonicalType();
+        assert(Canon->isBuiltinType());
+        const BuiltinType* BI = cast<BuiltinType>(Canon);
+        if (TL->getKind() != BI->getKind()) EE->setImpCast(TL->getKind());
+        if (QT == Type::Bool()) {
+            // NOTE: any integer to bool is ok
+            return false;
+        }
+
+        *availableWidth = TL->getIntegerWidth();
+    } else if (QT.isPointerType()) {
+        *availableWidth = 32;    // only 32-bit for now
+        // dont ask for pointer, replace with uint32 here.
+    } else {
+        StringBuilder t1name(128);
+        Right->getType().DiagName(t1name);
+        // Q: allow FuncPtr to return 0? (or nil?)
+        StringBuilder t2name(128);
+        TLeft->DiagName(t2name);
+        Diags.Report(Right->getLocation(), diag::err_typecheck_convert_incompatible) << t1name << t2name << 2 << 0 << 0;
+        return false;
+        //QT.dump();
+        //assert(0 && "todo");
+    }
+
+    return true;
+}
+
 APSInt LiteralAnalyser::checkLiterals(const Expr* Right) {
-    if (Right->getCTC() == CTC_NONE) return APSInt();
+    if (Right->getCTC() == CTC_NONE) return APSInt(64, false);
 
     APSInt result(64, false);
 
@@ -157,11 +201,11 @@ APSInt LiteralAnalyser::checkLiterals(const Expr* Right) {
     case EXPR_BOOL_LITERAL:
         break;
     case EXPR_CHAR_LITERAL:
-        {
-            const CharacterLiteral* C = cast<CharacterLiteral>(Right);
-            result = APInt(64, C->getValue(), true);
-            break;
-        }
+    {
+        const CharacterLiteral* C = cast<CharacterLiteral>(Right);
+        result = APInt(64, C->getValue(), true);
+        break;
+    }
     case EXPR_STRING_LITERAL:
         break;
     case EXPR_NIL:
@@ -175,8 +219,6 @@ APSInt LiteralAnalyser::checkLiterals(const Expr* Right) {
     case EXPR_DESIGNATOR_INIT:
         assert(0 && "TODO");
         break;
-    case EXPR_DECL:
-        break;
     case EXPR_BINOP:
         return checkBinaryLiterals(Right);
     case EXPR_CONDOP:
@@ -184,25 +226,57 @@ APSInt LiteralAnalyser::checkLiterals(const Expr* Right) {
     case EXPR_UNARYOP:
         return checkUnaryLiterals(Right);
     case EXPR_BUILTIN:
-        // TODO return correct value, for now always return 4 for sizeof() and elemsof()
-        result = APInt(64, 4, true);
-        break;
+    {
+        const BuiltinExpr* B = cast<BuiltinExpr>(Right);
+        return B->getValue();
+    }
     case EXPR_ARRAYSUBSCRIPT:
+        return checkArraySubscript(Right);
+    case EXPR_MEMBER:
+    {
+        // Q: is this correct for Struct.Member?
+        const MemberExpr* M = cast<MemberExpr>(Right);
+        return checkDecl(M->getDecl());
+    }
+    case EXPR_PAREN:
+    {
+        const ParenExpr* P = cast<ParenExpr>(Right);
+        return checkLiterals(P->getExpr());
+    }
+    case EXPR_BITOFFSET:
         assert(0 && "TODO");
         break;
-    case EXPR_MEMBER:
-        {
-            // Q: is this correct for Struct.Member?
-            const MemberExpr* M = cast<MemberExpr>(Right);
-            return checkDecl(M->getDecl());
-        }
-    case EXPR_PAREN:
-        {
-            const ParenExpr* P = cast<ParenExpr>(Right);
-            return checkLiterals(P->getExpr());
-        }
+    case EXPR_CAST:
+    {
+        // a cast may change the value without warning
+        const ExplicitCastExpr* E = cast<ExplicitCastExpr>(Right);
+        APSInt Result = checkLiterals(E->getInner());
+        SmallString<20> ss;
+        Result.toString(ss, 10, true);
+        fprintf(stderr, "Original %s\n", ss.c_str());
+        return truncateLiteral(E->getDestType(), Right, Result);
+    }
     }
     return result;
+}
+
+void LiteralAnalyser::checkBitOffset(const Expr* Left, const Expr* Right) {
+    assert(isa<ArraySubscriptExpr>(Left));
+    const ArraySubscriptExpr* A = cast<ArraySubscriptExpr>(Left);
+    assert(isa<BitOffsetExpr>(A->getIndex()));
+    const BitOffsetExpr* BO = cast<BitOffsetExpr>(A->getIndex());
+
+    StringBuilder tname;
+    tname << "unsigned:" << BO->getWidth();
+    Limit L;
+    L.minVal = 0;
+    L.maxVal = (((uint64_t) 1)<<BO->getWidth()) -1;
+    // TODO do something special for width 64?
+    StringBuilder maxVal;
+    maxVal << L.maxVal;
+    L.minStr = "0";
+    L.maxStr = (const char*)maxVal;
+    checkWidth(BO->getWidth(), &L, Right, tname);
 }
 
 bool LiteralAnalyser::checkRange(QualType TLeft, const Expr* Right, clang::SourceLocation Loc, llvm::APSInt Result) {
@@ -242,10 +316,10 @@ bool LiteralAnalyser::checkRange(QualType TLeft, const Expr* Right, clang::Sourc
 
         if (Right) {
             Diags.Report(Right->getLocStart(), diag::err_literal_outofbounds)
-                << buf1 << L->minStr << L->maxStr << ss << Right->getSourceRange();
+                    << buf1 << L->minStr << L->maxStr << ss << Right->getSourceRange();
         } else {
             Diags.Report(Loc, diag::err_literal_outofbounds)
-                << buf1 << L->minStr << L->maxStr << ss;
+                    << buf1 << L->minStr << L->maxStr << ss;
         }
         return false;
     }
@@ -275,13 +349,13 @@ APSInt LiteralAnalyser::checkUnaryLiterals(const Expr* Right) {
         // TODO
         break;
     case UO_Minus:
-        {
-            APSInt Result = checkLiterals(unaryop->getExpr());
-            APInt invert(64, -1, true);
-            APSInt I(invert, false);
-            Result *= I;
-            return Result;
-        }
+    {
+        APSInt Result = checkLiterals(unaryop->getExpr());
+        APInt invert(64, -1, true);
+        APSInt I(invert, false);
+        Result *= I;
+        return Result;
+    }
     case UO_Not:
     case UO_LNot:
         // TODO
@@ -302,35 +376,43 @@ APSInt LiteralAnalyser::checkBinaryLiterals(const Expr* Right) {
         // TODO
         break;
     case BO_Mul:
-        {
-            APSInt L = checkLiterals(binop->getLHS());
-            APSInt R = checkLiterals(binop->getRHS());
-            return L * R;
-        }
+    {
+        APSInt L = checkLiterals(binop->getLHS());
+        APSInt R = checkLiterals(binop->getRHS());
+        return L * R;
+    }
     case BO_Div:
-        {
-            APSInt L = checkLiterals(binop->getLHS());
-            APSInt R = checkLiterals(binop->getRHS());
-            return L / R;
+    {
+        APSInt L = checkLiterals(binop->getLHS());
+        APSInt R = checkLiterals(binop->getRHS());
+        if (R == 0) {
+            Diags.Report(binop->getRHS()->getLocation(), diag::warn_remainder_division_by_zero) << 1;
+            break;
         }
+        return L / R;
+    }
     case BO_Rem:
-        {
-            APSInt L = checkLiterals(binop->getLHS());
-            APSInt R = checkLiterals(binop->getRHS());
-            return L % R;
+    {
+        APSInt L = checkLiterals(binop->getLHS());
+        APSInt R = checkLiterals(binop->getRHS());
+        if (R == 0) {
+            Diags.Report(binop->getRHS()->getLocation(), diag::warn_remainder_division_by_zero) << 0;
+            break;
         }
+        return L % R;
+    }
     case BO_Add:
-        {
-            APSInt L = checkLiterals(binop->getLHS());
-            APSInt R = checkLiterals(binop->getRHS());
-            return L + R;
-        }
+    {
+        APSInt L = checkLiterals(binop->getLHS());
+        APSInt R = checkLiterals(binop->getRHS());
+        return L + R;
+    }
     case BO_Sub:
-        {
-            APSInt L = checkLiterals(binop->getLHS());
-            APSInt R = checkLiterals(binop->getRHS());
-            return L - R;
-        }
+    {
+        APSInt L = checkLiterals(binop->getLHS());
+        APSInt R = checkLiterals(binop->getRHS());
+        return L - R;
+    }
     case BO_Shl:
     case BO_Shr:
         break;
@@ -371,6 +453,27 @@ APSInt LiteralAnalyser::checkBinaryLiterals(const Expr* Right) {
     return APSInt();
 }
 
+APSInt LiteralAnalyser::checkArraySubscript(const Expr* Right) {
+    const ArraySubscriptExpr* AS = cast<ArraySubscriptExpr>(Right);
+    assert(AS);
+    assert(isa<BitOffsetExpr>(AS->getIndex()) && "TODO only bitoffsets for now");
+
+    APSInt base = checkLiterals(AS->getBase());
+
+    const BitOffsetExpr* BO = cast<BitOffsetExpr>(AS->getIndex());
+    APSInt low = checkLiterals(BO->getRHS());
+    unsigned width = BO->getWidth();
+
+    // calculate result = ((base >> low) & bitmask(width));
+    uint64_t result = base.getZExtValue();
+    result >>= low.getZExtValue();
+    result &= Utils::bitmask(width);
+
+    APSInt Result(64, false);
+    Result = result;
+    return Result;
+}
+
 APSInt LiteralAnalyser::checkDecl(const Decl* D) {
     assert(D);
     const EnumConstantDecl* ECD = dyncast<EnumConstantDecl>(D);
@@ -385,5 +488,13 @@ APSInt LiteralAnalyser::checkDecl(const Decl* D) {
     }
     assert(0 && "should not come here");
     return APSInt();
+}
+
+APSInt LiteralAnalyser::truncateLiteral(QualType TLeft, const Expr* Right, APSInt Orig) {
+    int availableWidth = 0;
+    // TODO needs cleanup (first check if conversions are ok, then check literal values?)
+    if (!calcWidth(TLeft, Right, &availableWidth)) return APSInt(0);
+
+    return Orig.trunc(availableWidth);
 }
 

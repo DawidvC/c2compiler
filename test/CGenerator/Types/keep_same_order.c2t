@@ -1,0 +1,30 @@
+// @recipe bin
+    $warnings no-unused
+    $generate-c
+
+// @file{file1}
+module test;
+
+type Number int32;
+
+type Point struct {
+    int32 x;
+}
+
+type State enum int8 { A, B, C }
+
+// @expect{atleast, build/test.c}
+typedef struct test_Point_ test_Point;
+
+typedef int32_t test_Number;
+
+struct test_Point_ {
+    int32_t x;
+};
+
+typedef enum {
+  test_A,
+  test_B,
+  test_C,
+} test_State;
+

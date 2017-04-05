@@ -1,5 +1,0 @@
-// @warnings{no-unused}
-module test;
-
-int[MISSING] buf1;  // @error{use of undeclared identifier MISSING}
-

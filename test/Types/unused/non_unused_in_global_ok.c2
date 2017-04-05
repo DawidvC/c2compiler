@@ -1,0 +1,6 @@
+// @warnings{no-unused-variable}
+module test;
+
+type Number int32;
+Number n;
+
